@@ -1,0 +1,40 @@
+{
+  "name": "apple-wallet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Manage company and employee vCards as Apple Wallet passes",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "test": "node --test",
+    "build:web": "vite build",
+    "dev:web": "vite build --watch",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@fastify/static": "^10.1.8",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "fastify": "^5.12.7",
+    "lucide-react": "^1.63.0",
+    "passkit-generator": "^3.7.0",
+    "pg": "^8.23.1",
+    "radix-ui": "^1.8.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router": "^8.5.1",
+    "tailwind-merge": "^3.7.0"
+  },
+  "overrides": {
+    "joi": "^17.13.9"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.1.2",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.5"
+  }
+}

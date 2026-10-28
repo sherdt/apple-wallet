@@ -1,0 +1,9 @@
+node_modules/
+certs/
+*.p12
+*.pem
+.env
+public/admin/
+.DS_Store
+.idea/
+temp/
