@@ -37,7 +37,7 @@ export function html(strings, ...values) {
 const header = (nav, headerTitle, headerIcon) =>
   headerTitle
     ? html`<header class="top branded"><span class="brand">${headerIcon ? html`<img class="brand-icon" src="${headerIcon}" alt="" width="28" height="28">` : ''}${headerTitle}</span></header>`
-    : html`<header class="top">${nav ? html`<a class="brand" href="/admin">Wallet cards</a>` : ''}</header>`;
+    : nav ? html`<header class="top"><a class="brand" href="/admin">Wallet cards</a></header>` : '';
 
 const layout = ({ title, body, nav = true, headerTitle, headerIcon }) => html`<!doctype html>
 <html lang="en">
@@ -58,8 +58,6 @@ export const publicCardPage = ({ employee, company }) =>
   layout({
     title: `${employee.name}`,
     nav: false,
-    headerTitle: company.name,
-    headerIcon: company.has_icon ? `/admin/icons/${company.id}` : null,
     body: html`
       <article class="pcard">
         ${employee.photo ? html`<img class="pcard-photo" src="/p/${employee.token}/photo.jpg" alt="" width="88" height="88">` : ''}
