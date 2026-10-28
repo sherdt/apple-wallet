@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { ConfirmDialog } from '../components/ui/confirm-dialog.jsx';
 import { Badge } from '../components/ui/badge.jsx';
 import { PageHeader, Spinner } from '../components/form.jsx';
+import { CompanyIcon } from '../components/company-icon.jsx';
 import { ErrorAlert, SuccessAlert } from '../components/notice.jsx';
 
 export function CompanyPage() {
@@ -47,7 +48,15 @@ export function CompanyPage() {
 
   return (
     <>
-      <PageHeader title={company.name} description={websiteHref ? undefined : 'No website set'}>
+      <PageHeader
+        title={
+          <span className="flex items-center gap-3">
+            <CompanyIcon company={company} />
+            {company.name}
+          </span>
+        }
+        description={websiteHref ? undefined : 'No website set'}
+      >
         {websiteHref ? (
           <Button variant="outline" asChild>
             <a href={websiteHref} target="_blank" rel="noopener noreferrer"><ExternalLink />Website</a>

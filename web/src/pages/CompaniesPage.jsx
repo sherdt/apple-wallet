@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router';
-import { Building2, Plus, Search, Users } from 'lucide-react';
+import { Plus, Search, Users } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAsync } from '../lib/useAsync.js';
 import { Button } from '../components/ui/button.jsx';
@@ -8,6 +8,7 @@ import { Input } from '../components/ui/input.jsx';
 import { Badge } from '../components/ui/badge.jsx';
 import { Card, CardContent } from '../components/ui/card.jsx';
 import { PageHeader, Spinner } from '../components/form.jsx';
+import { CompanyIcon } from '../components/company-icon.jsx';
 import { ErrorAlert, SuccessAlert } from '../components/notice.jsx';
 
 export function CompaniesPage() {
@@ -64,9 +65,12 @@ export function CompaniesPage() {
                   <Link to={`/companies/${c.id}`} className="block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <Card className="h-full transition-shadow hover:shadow-md">
                       <CardContent className="flex items-start justify-between gap-4">
-                        <div className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <CompanyIcon company={c} />
+                          <div className="min-w-0">
                           <p className="truncate font-semibold">{c.name}</p>
                           <p className="mt-1 truncate text-sm text-muted-foreground">{c.website || 'No website'}</p>
+                          </div>
                         </div>
                         <Badge variant="secondary" className="shrink-0 gap-1">
                           <Users className="size-3" />{c.employee_count}

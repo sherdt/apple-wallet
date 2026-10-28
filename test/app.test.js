@@ -99,6 +99,10 @@ function fakeRepo() {
     async deleteCompany(id) {
       companies.delete(id);
     },
+    async getCompanyIcon() {
+      return null;
+    },
+    async setCompanyIcon() {},
     async listEmployees(companyId) {
       return [...employees.values()].filter((e) => e.company_id === companyId);
     },
@@ -248,4 +252,34 @@ test('API responses and public pages carry security headers', async () => {
   assert.match(res.headers['content-security-policy'], /script-src 'self'/);
   assert.equal(res.headers['x-frame-options'], 'DENY');
   await app.close();
+});
+
+test('isPublicAddress rejects private, loopback and mapped internal addresses', async () => {
+  const { isPublicAddress } = await import('../src/icon.js');
+  for (const ip of ['127.0.0.1', '10.1.2.3', '192.168.1.5', '172.20.0.1', '169.254.169.254', '::1', 'fd00::1', '::ffff:10.0.0.1']) {
+    assert.equal(isPublicAddress(ip), false, ip);
+  }
+  for (const ip of ['93.184.216.34', '2606:4700::1111']) assert.equal(isPublicAddress(ip), true, ip);
+});
+
+test('fetchCompanyIcon refuses internal targets and returns null', async () => {
+  const { fetchCompanyIcon } = await import('../src/icon.js');
+  assert.equal(await fetchCompanyIcon('http://127.0.0.1:9/'), null);
+  assert.equal(await fetchCompanyIcon('ftp://example.com/'), null);
+  assert.equal(await fetchCompanyIcon('not a url'), null);
+});
+
+test('renderSquare turns an SVG into a square PNG and passIcons uses it', async () => {
+  const { renderSquare, passIcons } = await import('../src/icon.js');
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 256"><rect width="512" height="256" fill="red"/></svg>');
+  const png = await renderSquare(svg, 256);
+  assert.equal(png.subarray(1, 4).toString(), 'PNG');
+  const defaults = { 'icon.png': Buffer.from('default') };
+  assert.deepEqual(await passIcons(null, defaults), defaults);
+  const custom = await passIcons(png, defaults);
+  assert.notEqual(custom['icon.png'], defaults['icon.png']);
+  const sharp = (await import('sharp')).default;
+  for (const [name, size] of [['icon.png', 29], ['icon@2x.png', 58], ['icon@3x.png', 87]]) {
+    assert.equal((await sharp(custom[name]).metadata()).width, size, name);
+  }
 });

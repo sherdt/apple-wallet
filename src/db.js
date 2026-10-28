@@ -45,6 +45,9 @@ export async function migrate(pool) {
 
     -- Columns removed from the UI. Dropped here so existing databases match the schema.
     ALTER TABLE companies DROP COLUMN IF EXISTS color;
+
+    -- PNG fetched from the company website. Never sent to the browser; see has_icon.
+    ALTER TABLE companies ADD COLUMN IF NOT EXISTS icon bytea;
     ALTER TABLE employees DROP COLUMN IF EXISTS department, DROP COLUMN IF EXISTS phone;
   `);
 }
@@ -55,6 +58,9 @@ export function newToken() {
   return randomBytes(24).toString('base64url');
 }
 
+// Everything except the icon bytes, which would bloat every JSON response.
+const COMPANY_COLUMNS = 'id, name, website, created_at, (icon IS NOT NULL) AS has_icon';
+
 export function createRepository(pool) {
   return {
     async ping() {
@@ -63,7 +69,8 @@ export function createRepository(pool) {
 
     async listCompanies() {
       const { rows } = await pool.query(`
-        SELECT c.*, count(e.id)::int AS employee_count
+        SELECT c.id, c.name, c.website, c.created_at, (c.icon IS NOT NULL) AS has_icon,
+               count(e.id)::int AS employee_count
         FROM companies c
         LEFT JOIN employees e ON e.company_id = c.id
         GROUP BY c.id
@@ -72,13 +79,22 @@ export function createRepository(pool) {
     },
 
     async getCompany(id) {
-      const { rows } = await pool.query('SELECT * FROM companies WHERE id = $1', [id]);
+      const { rows } = await pool.query(`SELECT ${COMPANY_COLUMNS} FROM companies WHERE id = $1`, [id]);
       return rows[0] ?? null;
+    },
+
+    async getCompanyIcon(id) {
+      const { rows } = await pool.query('SELECT icon FROM companies WHERE id = $1', [id]);
+      return rows[0]?.icon ?? null;
+    },
+
+    async setCompanyIcon(id, icon) {
+      await pool.query('UPDATE companies SET icon = $2 WHERE id = $1', [id, icon]);
     },
 
     async createCompany({ name, website }) {
       const { rows } = await pool.query(
-        'INSERT INTO companies (name, website) VALUES ($1, $2) RETURNING *',
+        `INSERT INTO companies (name, website) VALUES ($1, $2) RETURNING ${COMPANY_COLUMNS}`,
         [name, website],
       );
       return rows[0];
@@ -86,7 +102,7 @@ export function createRepository(pool) {
 
     async updateCompany(id, { name, website }) {
       const { rows } = await pool.query(
-        'UPDATE companies SET name = $2, website = $3 WHERE id = $1 RETURNING *',
+        `UPDATE companies SET name = $2, website = $3 WHERE id = $1 RETURNING ${COMPANY_COLUMNS}`,
         [id, name, website],
       );
       return rows[0] ?? null;
@@ -112,7 +128,7 @@ export function createRepository(pool) {
     // Joins the company so a public request needs only one query.
     async getEmployeeByToken(token) {
       const { rows } = await pool.query(
-        `SELECT e.*, row_to_json(c.*) AS company
+        `SELECT e.*, json_build_object('id', c.id, 'name', c.name, 'website', c.website) AS company
          FROM employees e JOIN companies c ON c.id = e.company_id
          WHERE e.token = $1`,
         [token],

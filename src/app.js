@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { buildPass } from './pass.js';
+import { fetchCompanyIcon, passIcons } from './icon.js';
 import { buildVCard } from './vcard.js';
 import { validateCompany, validateEmployee } from './validation.js';
 import * as views from './views.js';
@@ -143,13 +144,22 @@ export async function buildApp({ config, repo, certificates, icons }) {
   const api = '/admin/api';
   const validationError = (reply, { errors, fieldErrors }) => reply.code(400).send({ errors, fieldErrors });
 
+  // Stores the icon fetched from the website, or clears it when none is found.
+  async function refreshIcon(company) {
+    const icon = company.website ? await fetchCompanyIcon(company.website) : null;
+    await repo.setCompanyIcon(company.id, icon);
+    return icon !== null;
+  }
+
   app.get(`${api}/companies`, async () => repo.listCompanies());
 
   app.post(`${api}/companies`, async (request, reply) => {
     const checked = validateCompany(request.body ?? {});
     if (checked.errors.length) return validationError(reply, checked);
     try {
-      return reply.code(201).send(await repo.createCompany(checked.values));
+      const company = await repo.createCompany(checked.values);
+      company.has_icon = await refreshIcon(company);
+      return reply.code(201).send(company);
     } catch (err) {
       if (!isUniqueViolation(err)) throw err;
       return reply.code(409).send({ errors: [DUPLICATE_COMPANY], fieldErrors: { name: DUPLICATE_COMPANY } });
@@ -168,11 +178,27 @@ export async function buildApp({ config, repo, certificates, icons }) {
     const checked = validateCompany(request.body ?? {});
     if (checked.errors.length) return validationError(reply, checked);
     try {
-      return await repo.updateCompany(company.id, checked.values);
+      const updated = await repo.updateCompany(company.id, checked.values);
+      if (updated.website !== company.website) updated.has_icon = await refreshIcon(updated);
+      return updated;
     } catch (err) {
       if (!isUniqueViolation(err)) throw err;
       return reply.code(409).send({ errors: [DUPLICATE_COMPANY], fieldErrors: { name: DUPLICATE_COMPANY } });
     }
+  });
+
+  app.get(`${api}/companies/:id/icon`, async (request, reply) => {
+    const company = await findCompany(request.params.id, reply);
+    if (!company) return notFound(reply, 'Company');
+    const icon = await repo.getCompanyIcon(company.id);
+    if (!icon) return reply.code(404).send({ errors: ['No icon'] });
+    return reply.type('image/png').header('Cache-Control', 'no-store').send(icon);
+  });
+
+  app.post(`${api}/companies/:id/icon`, async (request, reply) => {
+    const company = await findCompany(request.params.id, reply);
+    if (!company) return notFound(reply, 'Company');
+    return { has_icon: await refreshIcon(company) };
   });
 
   app.delete(`${api}/companies/:id`, async (request, reply) => {
@@ -242,7 +268,8 @@ export async function buildApp({ config, repo, certificates, icons }) {
         .header('Cache-Control', 'no-store')
         .send(buildVCard(employee, company));
     }
-    const body = buildPass({ employee, company, config, certificates, icons });
+    const storedIcon = await repo.getCompanyIcon(company.id);
+    const body = buildPass({ employee, company, config, certificates, icons: await passIcons(storedIcon, icons) });
     return reply
       .type('application/vnd.apple.pkpass')
       .header('Content-Disposition', `attachment; filename="${slug}.pkpass"`)

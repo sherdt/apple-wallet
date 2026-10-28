@@ -87,6 +87,14 @@ Requires Node 22.9+ and Docker.
    npm test
    ```
 
+## Company icons
+
+When a company is created, or its website changes, the app fetches the icon from
+the website (`<link rel="icon">` tags, then `/icon.svg`, then
+`/apple-touch-icon.png`) and stores it as a PNG in the database. Passes use it
+instead of the default `assets/icon*.png`. Private and loopback addresses are
+refused. Use `POST /admin/api/companies/:id/icon` to retry a failed fetch.
+
 ## Deployment
 
 The Kubernetes runtime is defined in `azure-sponsorship/wallet.tf`. Steps:
