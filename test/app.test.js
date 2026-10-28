@@ -583,7 +583,10 @@ test('renderSquare turns an SVG into a square PNG and passIcons uses it', async 
   for (const [name, size] of [['icon.png', 29], ['icon@2x.png', 58], ['icon@3x.png', 87]]) {
     assert.equal((await sharp(custom[name]).metadata()).width, size, name);
   }
-  assert.equal(custom['logo.png'], undefined);
+  for (const [name, [w, h]] of [['logo.png', [144, 45]], ['logo@2x.png', [288, 90]]]) {
+    const meta = await sharp(custom[name]).metadata();
+    assert.deepEqual([meta.width, meta.height], [w, h], name);
+  }
 });
 
 test('company admins can manage a company once added by email', async () => {

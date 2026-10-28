@@ -15,7 +15,7 @@ export async function loadCertificates(dir) {
   return { wwdr, signerCert, signerKey };
 }
 
-const IMAGE_FILES = ['icon.png', 'icon@2x.png', 'icon@3x.png'];
+const IMAGE_FILES = ['icon.png', 'icon@2x.png', 'icon@3x.png', 'logo.png', 'logo@2x.png'];
 
 export async function loadIcons() {
   const images = await Promise.all(IMAGE_FILES.map((name) => readFile(join(ASSET_DIR, name))));

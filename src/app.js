@@ -255,7 +255,7 @@ export async function buildApp({ config, repo, certificates, icons }) {
   app.get('/admin/icons/:id', async (request, reply) => {
     const icon = UUID.test(request.params.id) ? await repo.getCompanyIcon(request.params.id) : null;
     if (!icon) return reply.code(404).send({ errors: ['No icon'] });
-    return reply.type('image/png').header('Cache-Control', 'private, max-age=300').send(icon);
+    return reply.type('image/png').header('Cache-Control', 'private, no-cache').send(icon);
   });
 
   // Logos can be SVG, so this route needs the larger body limit used for photos.
