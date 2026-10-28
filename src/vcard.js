@@ -15,7 +15,12 @@ function nameParts(name) {
 
 // Builds the vCard for an employee. Lines are CRLF-terminated as the spec
 // requires; the same string is used for the .vcf download and the QR code.
-export function buildVCard(employee, company) {
+// Public URL of the employee's photo, or null when there is none. The token is the same credential as the card URL.
+export function photoUrl(origin, employee) {
+  return employee.photo ? `${origin}/p/${employee.token}/photo.jpg` : null;
+}
+
+export function buildVCard(employee, company, { photo } = {}) {
   const fullName = employee.name;
   const lines = [
     'BEGIN:VCARD',
@@ -31,7 +36,13 @@ export function buildVCard(employee, company) {
   if (employee.job_title) lines.push(`TITLE:${escapeValue(employee.job_title)}`);
   if (employee.email) lines.push(`EMAIL;TYPE=INTERNET,WORK:${escapeValue(employee.email)}`);
   if (employee.mobile) lines.push(`TEL;TYPE=CELL,VOICE:${escapeValue(employee.mobile)}`);
+  if (employee.linkedin) lines.push(`X-SOCIALPROFILE;TYPE=linkedin:${escapeValue(employee.linkedin)}`);
+  // vCard has no standard free-text location field; NOTE is the visible place for it.
+  if (employee.location) lines.push(`NOTE:${escapeValue(`Standort | ${employee.location}`)}`);
   if (company?.website) lines.push(`URL:${escapeValue(company.website)}`);
+  // ADR fields: PO box, extended address, street, locality, region, postal code, country.
+  if (company?.address) lines.push(`ADR;TYPE=WORK:;;${escapeValue(company.address)};;;;`);
+  if (photo) lines.push(`PHOTO;VALUE=uri:${photo}`);
 
   lines.push('END:VCARD');
   return lines.join('\r\n') + '\r\n';

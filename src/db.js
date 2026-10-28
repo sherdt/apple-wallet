@@ -33,6 +33,15 @@ export async function migrate(pool) {
     CREATE UNIQUE INDEX IF NOT EXISTS companies_owner_name_key ON companies (owner_id, name);
     CREATE INDEX IF NOT EXISTS companies_owner_idx ON companies (owner_id);
 
+    -- Users added as admins of a company by an existing admin. The owner_id stays the creator.
+    CREATE TABLE IF NOT EXISTS company_admins (
+        company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (company_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS company_admins_user_idx ON company_admins (user_id);
+
     CREATE TABLE IF NOT EXISTS employees (
       id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       company_id  uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -63,9 +72,21 @@ export async function migrate(pool) {
 
     -- PNG fetched from the company website. Never sent to the browser; see has_icon.
     ALTER TABLE companies ADD COLUMN IF NOT EXISTS icon bytea;
+    -- Postal address put on every vCard of the company's employees.
+    ALTER TABLE companies ADD COLUMN IF NOT EXISTS address text;
     ALTER TABLE employees DROP COLUMN IF EXISTS department, DROP COLUMN IF EXISTS phone;
+    -- JPEG profile photo, used for the pass thumbnail. Never sent in list responses; see has_photo.
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS photo bytea;
+    -- LinkedIn profile URL, added to the vCard as a social profile.
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS linkedin text;
+    -- Free-text location of the employee (for example an office), added to the vCard note.
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS location text;
   `);
 }
+
+// A user may manage a company if they created it or were added as an admin. $N is the user id placeholder.
+const canManage = (alias, param) =>
+  `(${alias}.owner_id = ${param} OR ${alias}.id IN (SELECT company_id FROM company_admins WHERE user_id = ${param}))`;
 
 // The token is the only credential for an employee's public card URL, so it
 // must be unguessable. Rotating it revokes the old links.
@@ -74,7 +95,13 @@ export function newToken() {
 }
 
 // Everything except the icon bytes, which would bloat every JSON response.
-const COMPANY_COLUMNS = 'id, name, website, created_at, (icon IS NOT NULL) AS has_icon';
+const COMPANY_COLUMNS = 'id, name, website, address, created_at, (icon IS NOT NULL) AS has_icon';
+
+// Everything except the photo bytes, which would bloat every JSON response.
+const EMPLOYEE_COLUMN_NAMES = ['id', 'company_id', 'name', 'job_title', 'email', 'mobile', 'linkedin', 'location', 'token', 'created_at'];
+const EMPLOYEE_COLUMNS = [...EMPLOYEE_COLUMN_NAMES, '(photo IS NOT NULL) AS has_photo'].join(', ');
+const employeeColumnsOf = (alias) =>
+  [...EMPLOYEE_COLUMN_NAMES.map((c) => `${alias}.${c}`), `(${alias}.photo IS NOT NULL) AS has_photo`].join(', ');
 
 export function createRepository(pool) {
   return {
@@ -123,7 +150,7 @@ export function createRepository(pool) {
                count(e.id)::int AS employee_count
         FROM companies c
         LEFT JOIN employees e ON e.company_id = c.id
-        WHERE c.owner_id = $1
+        WHERE ${canManage('c', '$1')}
         GROUP BY c.id
         ORDER BY lower(c.name)`, [ownerId]);
       return rows;
@@ -131,7 +158,7 @@ export function createRepository(pool) {
 
     async getCompany(id, ownerId) {
       const { rows } = await pool.query(
-        `SELECT ${COMPANY_COLUMNS} FROM companies WHERE id = $1 AND owner_id = $2`,
+        `SELECT ${COMPANY_COLUMNS} FROM companies WHERE id = $1 AND ${canManage('companies', '$2')}`,
         [id, ownerId],
       );
       return rows[0] ?? null;
@@ -146,18 +173,18 @@ export function createRepository(pool) {
       await pool.query('UPDATE companies SET icon = $2 WHERE id = $1', [id, icon]);
     },
 
-    async createCompany({ name, website }, ownerId) {
+    async createCompany({ name, website, address }, ownerId) {
       const { rows } = await pool.query(
-        `INSERT INTO companies (name, website, owner_id) VALUES ($1, $2, $3) RETURNING ${COMPANY_COLUMNS}`,
-        [name, website, ownerId],
+        `INSERT INTO companies (name, website, address, owner_id) VALUES ($1, $2, $3, $4) RETURNING ${COMPANY_COLUMNS}`,
+        [name, website, address, ownerId],
       );
       return rows[0];
     },
 
-    async updateCompany(id, { name, website }) {
+    async updateCompany(id, { name, website, address }) {
       const { rows } = await pool.query(
-        `UPDATE companies SET name = $2, website = $3 WHERE id = $1 RETURNING ${COMPANY_COLUMNS}`,
-        [id, name, website],
+        `UPDATE companies SET name = $2, website = $3, address = $4 WHERE id = $1 RETURNING ${COMPANY_COLUMNS}`,
+        [id, name, website, address],
       );
       return rows[0] ?? null;
     },
@@ -166,19 +193,50 @@ export function createRepository(pool) {
       await pool.query('DELETE FROM companies WHERE id = $1', [id]);
     },
 
-    async listEmployees(companyId) {
+    // Admins of a company, with the creator flagged as owner.
+    async listCompanyAdmins(companyId) {
       const { rows } = await pool.query(
-        'SELECT * FROM employees WHERE company_id = $1 ORDER BY lower(name)',
+        `SELECT u.id, u.email, u.name, (u.id = c.owner_id) AS is_owner
+         FROM companies c
+         JOIN users u ON u.id = c.owner_id OR u.id IN (SELECT user_id FROM company_admins WHERE company_id = c.id)
+         WHERE c.id = $1
+         ORDER BY is_owner DESC, lower(u.email)`,
         [companyId],
       );
       return rows;
     },
 
-    // Returns the employee only if its company belongs to ownerId.
+    // Returns false when the user is already an admin.
+    async addCompanyAdmin(companyId, userId) {
+      const { rowCount } = await pool.query(
+        'INSERT INTO company_admins (company_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [companyId, userId],
+      );
+      return rowCount === 1;
+    },
+
+    async removeCompanyAdmin(companyId, userId) {
+      const { rowCount } = await pool.query(
+        'DELETE FROM company_admins WHERE company_id = $1 AND user_id = $2',
+        [companyId, userId],
+      );
+      return rowCount === 1;
+    },
+
+    async listEmployees(companyId) {
+      const { rows } = await pool.query(
+        `SELECT ${EMPLOYEE_COLUMNS} FROM employees WHERE company_id = $1 ORDER BY lower(name)`,
+        [companyId],
+      );
+      return rows;
+    },
+
+    // Returns the employee only if the user may manage its company.
     async getEmployee(id, ownerId) {
       const { rows } = await pool.query(
-        `SELECT e.* FROM employees e JOIN companies c ON c.id = e.company_id
-         WHERE e.id = $1 AND c.owner_id = $2`,
+        `SELECT ${employeeColumnsOf('e')}
+         FROM employees e JOIN companies c ON c.id = e.company_id
+         WHERE e.id = $1 AND ${canManage('c', '$2')}`,
         [id, ownerId],
       );
       return rows[0] ?? null;
@@ -187,7 +245,7 @@ export function createRepository(pool) {
     // Joins the company so a public request needs only one query.
     async getEmployeeByToken(token) {
       const { rows } = await pool.query(
-        `SELECT e.*, json_build_object('id', c.id, 'name', c.name, 'website', c.website, 'has_icon', c.icon IS NOT NULL) AS company
+        `SELECT e.*, json_build_object('id', c.id, 'name', c.name, 'website', c.website, 'address', c.address, 'has_icon', c.icon IS NOT NULL) AS company
          FROM employees e JOIN companies c ON c.id = e.company_id
          WHERE e.token = $1`,
         [token],
@@ -198,15 +256,17 @@ export function createRepository(pool) {
     async createEmployee(companyId, fields) {
       const { rows } = await pool.query(
         `INSERT INTO employees
-           (company_id, name, job_title, email, mobile, token)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING *`,
+           (company_id, name, job_title, email, mobile, linkedin, location, token)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING ${EMPLOYEE_COLUMNS}`,
         [
           companyId,
           fields.name,
           fields.job_title,
           fields.email,
           fields.mobile,
+          fields.linkedin,
+          fields.location,
           newToken(),
         ],
       );
@@ -217,15 +277,17 @@ export function createRepository(pool) {
       const { rows } = await pool.query(
         `UPDATE employees SET
            name = $2, job_title = $3,
-           email = $4, mobile = $5
+           email = $4, mobile = $5, linkedin = $6, location = $7
          WHERE id = $1
-         RETURNING *`,
+         RETURNING ${EMPLOYEE_COLUMNS}`,
         [
           id,
           fields.name,
           fields.job_title,
           fields.email,
           fields.mobile,
+          fields.linkedin,
+          fields.location,
         ],
       );
       return rows[0] ?? null;
@@ -233,10 +295,19 @@ export function createRepository(pool) {
 
     async rotateEmployeeToken(id) {
       const { rows } = await pool.query(
-        'UPDATE employees SET token = $2 WHERE id = $1 RETURNING *',
+        `UPDATE employees SET token = $2 WHERE id = $1 RETURNING ${EMPLOYEE_COLUMNS}`,
         [id, newToken()],
       );
       return rows[0] ?? null;
+    },
+
+    async getEmployeePhoto(id) {
+      const { rows } = await pool.query('SELECT photo FROM employees WHERE id = $1', [id]);
+      return rows[0]?.photo ?? null;
+    },
+
+    async setEmployeePhoto(id, photo) {
+      await pool.query('UPDATE employees SET photo = $2 WHERE id = $1', [id, photo]);
     },
 
     async deleteEmployee(id) {

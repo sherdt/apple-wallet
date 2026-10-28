@@ -35,6 +35,12 @@ test('buildVCard emits CRLF-terminated vCard 3.0', () => {
   assert.ok(!card.includes('TEL;TYPE=WORK'));
 });
 
+test('buildVCard includes the company address as ADR', () => {
+  const card = buildVCard(employee, { ...company, address: 'Musterstraße 1\n80333 München' });
+  assert.ok(card.includes('ADR;TYPE=WORK:;;Musterstraße 1\\n80333 München;;;;\r\n'));
+  assert.ok(!buildVCard(employee, company).includes('ADR'));
+});
+
 test('validateCompany accepts good input and rejects bad input', () => {
   const ok = validateCompany({ name: ' PRODYNA SE ', website: 'https://example.com' });
   assert.deepEqual(ok.errors, []);
@@ -77,10 +83,12 @@ function fakeRepo() {
   const users = new Map();
   const companies = new Map([[company.id, { ...company }]]);
   const employees = new Map([[employee.id, { ...employee, company_id: company.id }]]);
-  const ownedCompany = (id, ownerId) => {
+  const admins = new Map(); // companyId -> Set of user ids added as admins
+  const canManage = (id, userId) => {
     const row = companies.get(id);
-    return row && row.owner_id === ownerId ? row : null;
+    return Boolean(row) && (row.owner_id === userId || Boolean(admins.get(id)?.has(userId)));
   };
+  const ownedCompany = (id, userId) => (canManage(id, userId) ? companies.get(id) : null);
   return {
     companies,
     employees,
@@ -112,13 +120,31 @@ function fakeRepo() {
       u.name = name;
       return { id: u.id, email: u.email, name, created_at: u.created_at };
     },
-    async listCompanies(ownerId) {
+    async listCompanies(userId) {
       return [...companies.values()]
-        .filter((c) => c.owner_id === ownerId)
+        .filter((c) => canManage(c.id, userId))
         .map((c) => ({ ...c, employee_count: 0 }));
     },
-    async getCompany(id, ownerId) {
-      return ownedCompany(id, ownerId);
+    async getCompany(id, userId) {
+      return ownedCompany(id, userId);
+    },
+    async listCompanyAdmins(companyId) {
+      const row = companies.get(companyId);
+      const ids = [row.owner_id, ...(admins.get(companyId) ?? [])];
+      return ids.map((id) => {
+        const u = [...users.values()].find((x) => x.id === id);
+        return { id, email: u?.email ?? 'creator@example.com', name: u?.name ?? null, is_owner: id === row.owner_id };
+      });
+    },
+    async addCompanyAdmin(companyId, userId) {
+      if (!admins.has(companyId)) admins.set(companyId, new Set());
+      const set = admins.get(companyId);
+      if (set.has(userId)) return false;
+      set.add(userId);
+      return true;
+    },
+    async removeCompanyAdmin(companyId, userId) {
+      return Boolean(admins.get(companyId)?.delete(userId));
     },
     async createCompany(values, ownerId) {
       const row = { id: randomUUID(), ...values, owner_id: ownerId };
@@ -165,6 +191,14 @@ function fakeRepo() {
     },
     async deleteEmployee(id) {
       employees.delete(id);
+    },
+    async getEmployeePhoto(id) {
+      return employees.get(id)?.photo ?? null;
+    },
+    async setEmployeePhoto(id, photo) {
+      const row = employees.get(id);
+      row.photo = photo;
+      row.has_photo = Boolean(photo);
     },
   };
 }
@@ -441,6 +475,82 @@ test('admin API flow creates an employee and public routes serve the card', asyn
   await app.close();
 });
 
+test('company logo is uploaded, returned as a flag and removed', async () => {
+  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts(), icons: await loadIcons() });
+  const headers = await signIn(app);
+  const created = (await app.inject({ method: 'POST', url: '/admin/api/companies', headers, payload: JSON.stringify({ name: 'Logo Co', website: 'https://logo.example.com/' }) })).json();
+  assert.equal(created.has_icon, false);
+
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>');
+  const up = await app.inject({
+    method: 'POST', url: `/admin/api/companies/${created.id}/icon`, headers,
+    payload: JSON.stringify({ icon: `data:image/svg+xml;base64,${svg.toString('base64')}` }),
+  });
+  assert.equal(up.statusCode, 200);
+  assert.equal(up.json().has_icon, true);
+
+  const bad = await app.inject({
+    method: 'POST', url: `/admin/api/companies/${created.id}/icon`, headers,
+    payload: JSON.stringify({ icon: 'data:text/plain;base64,aGVsbG8=' }),
+  });
+  assert.equal(bad.statusCode, 400);
+  assert.ok(bad.json().fieldErrors.icon);
+
+  const removed = await app.inject({ method: 'DELETE', url: `/admin/api/companies/${created.id}/icon`, headers: bodyless(headers) });
+  assert.equal(removed.statusCode, 204);
+  await app.close();
+});
+
+test('employee photo is stored, returned and used as the pass thumbnail', async () => {
+  const sharp = (await import('sharp')).default;
+  const source = await sharp({ create: { width: 300, height: 200, channels: 3, background: '#3366cc' } }).png().toBuffer();
+  const dataUrl = `data:image/png;base64,${source.toString('base64')}`;
+
+  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts(), icons: await loadIcons() });
+  const headers = await signIn(app);
+  const owned = (await app.inject({ method: 'POST', url: '/admin/api/companies', headers, payload: JSON.stringify({ name: 'Photo Co' }) })).json();
+  const emp = (await app.inject({
+    method: 'POST', url: `/admin/api/companies/${owned.id}/employees`, headers,
+    payload: JSON.stringify({ name: 'Photo Person', email: 'photo@example.com' }),
+  })).json();
+
+  const bad = await app.inject({
+    method: 'POST', url: `/admin/api/employees/${emp.id}/photo`, headers,
+    payload: JSON.stringify({ photo: 'data:text/plain;base64,aGVsbG8=' }),
+  });
+  assert.equal(bad.statusCode, 400);
+  assert.ok(bad.json().fieldErrors.photo);
+
+  const up = await app.inject({
+    method: 'POST', url: `/admin/api/employees/${emp.id}/photo`, headers,
+    payload: JSON.stringify({ photo: dataUrl }),
+  });
+  assert.equal(up.statusCode, 200);
+  assert.match(up.json().photo, /^data:image\/jpeg;base64,/);
+
+  const detail = await app.inject({ url: `/admin/api/employees/${emp.id}`, headers: bodyless(headers) });
+  assert.match(detail.json().photo, /^data:image\/jpeg;base64,/);
+
+  const pass = await app.inject({ url: `/p/${emp.token}.pkpass` });
+  assert.equal(pass.statusCode, 200);
+  // Zip entry names are stored uncompressed, so the archive lists the thumbnail files directly.
+  assert.ok(pass.rawPayload.includes(Buffer.from('thumbnail@3x.png')));
+
+  const photoRes = await app.inject({ url: `/p/${emp.token}/photo.jpg` });
+  assert.equal(photoRes.statusCode, 200);
+  assert.equal(photoRes.headers['content-type'], 'image/jpeg');
+  const vcf = await app.inject({ url: `/p/${emp.token}.vcf` });
+  assert.match(vcf.body, new RegExp(`PHOTO;VALUE=uri:http://localhost:?\\d*/p/${emp.token}/photo\\.jpg`));
+
+  const removed = await app.inject({ method: 'DELETE', url: `/admin/api/employees/${emp.id}/photo`, headers: bodyless(headers) });
+  assert.equal(removed.statusCode, 204);
+  const after = await app.inject({ url: `/admin/api/employees/${emp.id}`, headers: bodyless(headers) });
+  assert.equal(after.json().photo, null);
+  const vcfWithout = await app.inject({ url: `/p/${emp.token}.vcf` });
+  assert.doesNotMatch(vcfWithout.body, /PHOTO/);
+  await app.close();
+});
+
 test('API responses and public pages carry security headers', async () => {
   const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts(), icons: await loadIcons() });
   const headers = await signIn(app);
@@ -450,19 +560,14 @@ test('API responses and public pages carry security headers', async () => {
   await app.close();
 });
 
-test('isPublicAddress rejects private, loopback and mapped internal addresses', async () => {
-  const { isPublicAddress } = await import('../src/icon.js');
-  for (const ip of ['127.0.0.1', '10.1.2.3', '192.168.1.5', '172.20.0.1', '169.254.169.254', '::1', 'fd00::1', '::ffff:10.0.0.1']) {
-    assert.equal(isPublicAddress(ip), false, ip);
-  }
-  for (const ip of ['93.184.216.34', '2606:4700::1111']) assert.equal(isPublicAddress(ip), true, ip);
-});
-
-test('fetchCompanyIcon refuses internal targets and returns null', async () => {
-  const { fetchCompanyIcon } = await import('../src/icon.js');
-  assert.equal(await fetchCompanyIcon('http://127.0.0.1:9/'), null);
-  assert.equal(await fetchCompanyIcon('ftp://example.com/'), null);
-  assert.equal(await fetchCompanyIcon('not a url'), null);
+test('normalizeIcon accepts an uploaded SVG and rejects other data', async () => {
+  const { normalizeIcon } = await import('../src/icon.js');
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 256"><rect width="512" height="256" fill="red"/></svg>');
+  const icon = await normalizeIcon(`data:image/svg+xml;base64,${svg.toString('base64')}`);
+  assert.equal(icon.subarray(1, 4).toString(), 'PNG');
+  assert.equal(await normalizeIcon(`data:text/html;base64,${svg.toString('base64')}`), null);
+  assert.equal(await normalizeIcon('data:image/svg+xml;base64,bm90IGFuIGltYWdl'), null);
+  assert.equal(await normalizeIcon(null), null);
 });
 
 test('renderSquare turns an SVG into a square PNG and passIcons uses it', async () => {
@@ -478,4 +583,56 @@ test('renderSquare turns an SVG into a square PNG and passIcons uses it', async 
   for (const [name, size] of [['icon.png', 29], ['icon@2x.png', 58], ['icon@3x.png', 87]]) {
     assert.equal((await sharp(custom[name]).metadata()).width, size, name);
   }
+  assert.equal(custom['logo.png'], undefined);
+});
+
+test('company admins can manage a company once added by email', async () => {
+  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts(), icons: await loadIcons() });
+  const owner = await signIn(app, 'creator@example.com');
+  const guestEmail = 'guest@example.com';
+  const guest = await signIn(app, guestEmail);
+
+  const created = await app.inject({
+    method: 'POST', url: '/admin/api/companies', headers: owner,
+    payload: JSON.stringify({ name: 'Shared GmbH' }),
+  });
+  assert.equal(created.statusCode, 201);
+  const companyId = created.json().id;
+  const url = `/admin/api/companies/${companyId}`;
+
+  assert.equal((await app.inject({ method: 'GET', url, headers: bodyless(guest) })).statusCode, 404);
+
+  const unknown = await app.inject({
+    method: 'POST', url: `${url}/admins`, headers: owner,
+    payload: JSON.stringify({ email: 'nobody@example.com' }),
+  });
+  assert.equal(unknown.statusCode, 404);
+
+  const added = await app.inject({
+    method: 'POST', url: `${url}/admins`, headers: owner,
+    payload: JSON.stringify({ email: ' Guest@Example.com ' }),
+  });
+  assert.equal(added.statusCode, 201);
+  assert.equal(added.json().length, 2);
+
+  const again = await app.inject({
+    method: 'POST', url: `${url}/admins`, headers: owner,
+    payload: JSON.stringify({ email: guestEmail }),
+  });
+  assert.equal(again.statusCode, 409);
+
+  assert.equal((await app.inject({ method: 'GET', url, headers: bodyless(guest) })).statusCode, 200);
+  const list = await app.inject({ method: 'GET', url: `${url}/admins`, headers: bodyless(guest) });
+  const guestRow = list.json().find((a) => a.email === guestEmail);
+  const ownerRow = list.json().find((a) => a.is_owner);
+  assert.ok(guestRow && !guestRow.is_owner);
+  assert.ok(ownerRow);
+
+  const removeOwner = await app.inject({ method: 'DELETE', url: `${url}/admins/${ownerRow.id}`, headers: bodyless(guest) });
+  assert.equal(removeOwner.statusCode, 400);
+
+  const removeGuest = await app.inject({ method: 'DELETE', url: `${url}/admins/${guestRow.id}`, headers: bodyless(guest) });
+  assert.equal(removeGuest.statusCode, 204);
+  assert.equal((await app.inject({ method: 'GET', url, headers: bodyless(guest) })).statusCode, 404);
+  await app.close();
 });

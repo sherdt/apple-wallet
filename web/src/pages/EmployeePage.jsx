@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
-import { ArrowLeft, Check, Copy, Download, ExternalLink, Pencil, RefreshCw, Wallet } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Download, ExternalLink, Pencil, RefreshCw, User, Wallet } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAsync } from '../lib/useAsync.js';
 import { Button } from '../components/ui/button.jsx';
@@ -23,7 +23,7 @@ export function EmployeePage() {
   if (detail.loading) return <Spinner />;
   if (detail.error) return <ErrorAlert error={detail.error} />;
 
-  const { employee, company, origin } = detail.data;
+  const { employee, company, origin, photo } = detail.data;
   const cardPath = `/p/${employee.token}`;
   const cardUrl = `${origin}${cardPath}`;
 
@@ -70,7 +70,19 @@ export function EmployeePage() {
             <CardTitle>Contact</CardTitle>
             <CardDescription>Shown on the card and in the saved contact.</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="grid gap-6">
+            <div className="flex items-center gap-4">
+              <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted">
+                {photo ? (
+                  <img src={photo} alt={employee.name} className="size-full object-cover" />
+                ) : (
+                  <User className="size-8 text-muted-foreground" />
+                )}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {photo ? 'Also used as the thumbnail on the Wallet card.' : 'No photo yet. Add one in the employee settings.'}
+              </p>
+            </div>
             <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 text-sm">
               <dt className="text-muted-foreground">Job title</dt>
               <dd>{employee.job_title || '—'}</dd>
@@ -78,6 +90,10 @@ export function EmployeePage() {
               <dd>{employee.email || '—'}</dd>
               <dt className="text-muted-foreground">Mobile</dt>
               <dd>{employee.mobile || '—'}</dd>
+              <dt className="text-muted-foreground">Location</dt>
+              <dd>{employee.location || '—'}</dd>
+              <dt className="text-muted-foreground">LinkedIn</dt>
+              <dd>{employee.linkedin ? <a href={employee.linkedin} target="_blank" rel="noopener noreferrer" className="hover:underline">{employee.linkedin}</a> : '—'}</dd>
               <dt className="text-muted-foreground">Company</dt>
               <dd>
                 <Link to={`/companies/${company.id}`} className="hover:underline">{company.name}</Link>

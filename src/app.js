@@ -7,9 +7,10 @@ import fastifyJwt from '@fastify/jwt';
 import fastifyStatic from '@fastify/static';
 import { hashPassword, validateCredentials, validateNewPassword, verifyPassword } from './auth.js';
 import { buildPass } from './pass.js';
-import { fetchCompanyIcon, passIcons } from './icon.js';
-import { buildVCard } from './vcard.js';
+import { normalizeIcon, passIcons } from './icon.js';
+import { buildVCard, photoUrl } from './vcard.js';
 import { validateCompany, validateEmployee } from './validation.js';
+import { normalizePhoto, photoDataUrl, passThumbnails } from './photo.js';
 import * as views from './views.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -142,13 +143,6 @@ export async function buildApp({ config, repo, certificates, icons }) {
   const api = API;
   const validationError = (reply, { errors, fieldErrors }) => reply.code(400).send({ errors, fieldErrors });
 
-  // Stores the icon fetched from the website, or clears it when none is found.
-  async function refreshIcon(company) {
-    const icon = company.website ? await fetchCompanyIcon(company.website) : null;
-    await repo.setCompanyIcon(company.id, icon);
-    return icon !== null;
-  }
-
   // ---- Accounts ----
   // Every registered user is an admin of their own companies.
 
@@ -227,7 +221,7 @@ export async function buildApp({ config, repo, certificates, icons }) {
     if (checked.errors.length) return validationError(reply, checked);
     try {
       const company = await repo.createCompany(checked.values, request.user.sub);
-      company.has_icon = await refreshIcon(company);
+      company.has_icon = false;
       return reply.code(201).send(company);
     } catch (err) {
       if (!isUniqueViolation(err)) throw err;
@@ -248,7 +242,7 @@ export async function buildApp({ config, repo, certificates, icons }) {
     if (checked.errors.length) return validationError(reply, checked);
     try {
       const updated = await repo.updateCompany(company.id, checked.values);
-      if (updated.website !== company.website) updated.has_icon = await refreshIcon(updated);
+      updated.has_icon = company.has_icon;
       return updated;
     } catch (err) {
       if (!isUniqueViolation(err)) throw err;
@@ -257,23 +251,74 @@ export async function buildApp({ config, repo, certificates, icons }) {
   });
 
   // Served outside the JWT-protected API because <img> tags cannot send a Bearer token.
-  // The company id is a random UUID and the icon is public data fetched from the company website.
+  // The company id is a random UUID and the logo is uploaded by the company's admin.
   app.get('/admin/icons/:id', async (request, reply) => {
     const icon = UUID.test(request.params.id) ? await repo.getCompanyIcon(request.params.id) : null;
     if (!icon) return reply.code(404).send({ errors: ['No icon'] });
     return reply.type('image/png').header('Cache-Control', 'private, max-age=300').send(icon);
   });
 
-  app.post(`${api}/companies/:id/icon`, async (request, reply) => {
+  // Logos can be SVG, so this route needs the larger body limit used for photos.
+  app.post(`${api}/companies/:id/icon`, { bodyLimit: 8 * 1024 * 1024 }, async (request, reply) => {
     const company = await findCompany(request.params.id, reply, request.user.sub);
     if (!company) return notFound(reply, 'Company');
-    return { has_icon: await refreshIcon(company) };
+    const icon = await normalizeIcon(request.body?.icon);
+    if (!icon) {
+      const message = 'Logo must be an SVG, PNG, JPEG or WebP image.';
+      return validationError(reply, { errors: [message], fieldErrors: { icon: message } });
+    }
+    await repo.setCompanyIcon(company.id, icon);
+    return { has_icon: true };
+  });
+
+  app.delete(`${api}/companies/:id/icon`, async (request, reply) => {
+    const company = await findCompany(request.params.id, reply, request.user.sub);
+    if (!company) return notFound(reply, 'Company');
+    await repo.setCompanyIcon(company.id, null);
+    return reply.code(204).send();
   });
 
   app.delete(`${api}/companies/:id`, async (request, reply) => {
     const company = await findCompany(request.params.id, reply, request.user.sub);
     if (!company) return notFound(reply, 'Company');
     await repo.deleteCompany(company.id);
+    return reply.code(204).send();
+  });
+
+  // Company admins: any admin can add or remove others; the creator stays admin and cannot be removed.
+  app.get(`${api}/companies/:id/admins`, async (request, reply) => {
+    const company = await findCompany(request.params.id, reply, request.user.sub);
+    if (!company) return notFound(reply, 'Company');
+    return repo.listCompanyAdmins(company.id);
+  });
+
+  app.post(`${api}/companies/:id/admins`, async (request, reply) => {
+    const company = await findCompany(request.params.id, reply, request.user.sub);
+    if (!company) return notFound(reply, 'Company');
+    const email = String(request.body?.email ?? '').trim().toLowerCase();
+    const user = email ? await repo.findUserByEmail(email) : null;
+    if (!user) {
+      return reply.code(404).send({
+        errors: ['No registered user with this email.'],
+        fieldErrors: { email: 'No registered user with this email.' },
+      });
+    }
+    if (!(await repo.addCompanyAdmin(company.id, user.id))) {
+      return reply.code(409).send({ errors: ['This user is already an admin.'], fieldErrors: { email: 'This user is already an admin.' } });
+    }
+    return reply.code(201).send(await repo.listCompanyAdmins(company.id));
+  });
+
+  app.delete(`${api}/companies/:id/admins/:userId`, async (request, reply) => {
+    const company = await findCompany(request.params.id, reply, request.user.sub);
+    if (!company) return notFound(reply, 'Company');
+    const admins = await repo.listCompanyAdmins(company.id);
+    if (admins.some((a) => a.id === request.params.userId && a.is_owner)) {
+      return reply.code(400).send({ error: 'The company creator cannot be removed.' });
+    }
+    if (!UUID.test(request.params.userId) || !(await repo.removeCompanyAdmin(company.id, request.params.userId))) {
+      return notFound(reply, 'Admin');
+    }
     return reply.code(204).send();
   });
 
@@ -290,7 +335,30 @@ export async function buildApp({ config, repo, certificates, icons }) {
     const employee = await findEmployee(request.params.id, reply, request.user.sub);
     if (!employee) return notFound(reply, 'Employee');
     const company = await repo.getCompany(employee.company_id, request.user.sub);
-    return { employee, company, origin: config.publicOrigin };
+    const photo = employee.has_photo ? photoDataUrl(await repo.getEmployeePhoto(employee.id)) : null;
+    return { employee, company, origin: config.publicOrigin, photo };
+  });
+
+  // Photos arrive as base64 data URLs, so this route needs a larger body limit than the default 16 KB.
+  app.post(`${api}/employees/:id/photo`, { bodyLimit: 8 * 1024 * 1024 }, async (request, reply) => {
+    const employee = await findEmployee(request.params.id, reply, request.user.sub);
+    if (!employee) return notFound(reply, 'Employee');
+    const photo = await normalizePhoto(request.body?.photo);
+    if (!photo) {
+      return validationError(reply, {
+        errors: ['Photo must be a JPEG, PNG or WebP image.'],
+        fieldErrors: { photo: 'Photo must be a JPEG, PNG or WebP image.' },
+      });
+    }
+    await repo.setEmployeePhoto(employee.id, photo);
+    return { photo: photoDataUrl(photo) };
+  });
+
+  app.delete(`${api}/employees/:id/photo`, async (request, reply) => {
+    const employee = await findEmployee(request.params.id, reply, request.user.sub);
+    if (!employee) return notFound(reply, 'Employee');
+    await repo.setEmployeePhoto(employee.id, null);
+    return reply.code(204).send();
   });
 
   app.put(`${api}/employees/:id`, async (request, reply) => {
@@ -318,6 +386,14 @@ export async function buildApp({ config, repo, certificates, icons }) {
   // One route handles /p/:file so the token and suffix are parsed explicitly.
   // Tokens are base64url and never contain a dot, so the suffix is unambiguous.
 
+  // Public photo for the vCard PHOTO property; the token gates it like the card URL.
+  app.get('/p/:token/photo.jpg', async (request, reply) => {
+    const token = request.params.token;
+    const employee = /^[A-Za-z0-9_-]{20,64}$/.test(token) ? await repo.getEmployeeByToken(token) : null;
+    if (!employee?.photo) return reply.code(404).type('text/html; charset=utf-8').send(String(views.notFoundPage()));
+    return reply.type('image/jpeg').header('Cache-Control', 'public, max-age=3600').send(employee.photo);
+  });
+
   app.get('/p/:file', async (request, reply) => {
     const file = request.params.file;
     const suffix = file.endsWith('.pkpass') ? 'pkpass' : file.endsWith('.vcf') ? 'vcf' : 'html';
@@ -335,10 +411,17 @@ export async function buildApp({ config, repo, certificates, icons }) {
         .type('text/vcard; charset=utf-8')
         .header('Content-Disposition', `attachment; filename="${slug}.vcf"`)
         .header('Cache-Control', 'no-store')
-        .send(buildVCard(employee, company));
+        .send(buildVCard(employee, company, { photo: photoUrl(config.publicOrigin, employee) }));
     }
     const storedIcon = await repo.getCompanyIcon(company.id);
-    const body = buildPass({ employee, company, config, certificates, icons: await passIcons(storedIcon, icons) });
+    const thumbnails = employee.photo ? await passThumbnails(employee.photo) : {};
+    const body = buildPass({
+      employee,
+      company,
+      config,
+      certificates,
+      icons: { ...(await passIcons(storedIcon, icons)), ...thumbnails },
+    });
     return reply
       .type('application/vnd.apple.pkpass')
       .header('Content-Disposition', `attachment; filename="${slug}.pkpass"`)

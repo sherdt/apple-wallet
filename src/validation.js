@@ -4,9 +4,12 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const LABELS = {
   name: 'Company name',
   website: 'Website',
+  address: 'Address',
   job_title: 'Job title',
   email: 'Email',
   mobile: 'Mobile',
+  linkedin: 'LinkedIn',
+  location: 'Location',
 };
 
 const label = (field) => LABELS[field] ?? field;
@@ -63,6 +66,7 @@ export function validateCompany(form) {
   return collect(form, {
     name: requiredText(200),
     website: optionalUrl,
+    address: optionalText(300),
   });
 }
 
@@ -72,5 +76,7 @@ export function validateEmployee(form) {
     job_title: optionalText(150),
     email: optionalEmail,
     mobile: optionalText(50),
+    linkedin: optionalUrl,
+    location: optionalText(200),
   });
 }

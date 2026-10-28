@@ -81,6 +81,7 @@ input[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 1px 
   max-width: 380px; margin: 2.5rem auto; padding: 2rem 1.75rem; background: #fff;
   border-radius: 20px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
 }
+.pcard-photo { display: block; width: 88px; height: 88px; border-radius: 50%; object-fit: cover; margin: 0 0 1rem; }
 .pcard-name { font-size: 1.75rem; line-height: 1.2; margin: 0 0 0.25rem; letter-spacing: -0.01em; }
 .pcard-title { color: var(--muted); margin: 0 0 1.5rem; }
 .pcard-links { list-style: none; padding: 0; margin: 0 0 1.75rem; display: grid; gap: 0.9rem; }
@@ -88,6 +89,7 @@ input[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 1px 
 .pcard-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .pcard-links a { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; text-decoration: none; }
 .pcard-links a:hover { text-decoration: underline; }
+.pcard-address { color: var(--ink); font-weight: 500; white-space: pre-line; }
 .pcard-actions { display: grid; gap: 0.6rem; }
 .pcard-btn {
   display: flex; align-items: center; justify-content: center; height: 3rem; box-sizing: border-box;
@@ -95,5 +97,13 @@ input[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 1px 
 }
 .pcard-btn.primary { background: var(--ink); color: #fff; }
 .pcard-btn:hover { filter: brightness(0.95); }
+.pcard-btn.busy { opacity: 0.7; pointer-events: none; }
+.pcard-btn.busy::before {
+  content: ""; width: 1rem; height: 1rem; margin-right: 0.5rem; box-sizing: border-box;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+  animation: pcard-spin 0.8s linear infinite;
+}
+.pcard-status { color: var(--muted); font-size: 0.85rem; min-height: 1.2em; margin: 0.5rem 0 0; text-align: center; }
+@keyframes pcard-spin { to { transform: rotate(360deg); } }
 .pcard-note { color: var(--muted); font-size: 0.85rem; line-height: 1.5; margin: 1.25rem 0 0; text-align: center; }
 @media (max-width: 480px) { .pcard { margin: 1rem; padding: 1.5rem 1.25rem; } }

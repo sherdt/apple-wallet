@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
-import { ArrowLeft, ExternalLink, Pencil, Plus, Search, UserRound } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Pencil, Plus, Search, ShieldCheck, Trash2, UserRound } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { safeHttpUrl } from '../lib/utils.js';
 import { useAsync } from '../lib/useAsync.js';
@@ -44,7 +44,7 @@ export function CompanyPage() {
             {company.name}
           </span>
         }
-        description={websiteHref ? undefined : 'No website set'}
+        description={company.address ? <span className="whitespace-pre-line">{company.address}</span> : websiteHref ? undefined : 'No website set'}
       >
         {websiteHref ? (
           <Button variant="outline" asChild>
@@ -116,7 +116,6 @@ export function CompanyPage() {
           </Table>
         )}
       </Card>
-
     </>
   );
 }
