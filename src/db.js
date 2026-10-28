@@ -11,12 +11,27 @@ export function createPool(env = process.env) {
 // Idempotent; the role owns the database, so it may create its own tables.
 export async function migrate(pool) {
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      email         text NOT NULL UNIQUE,
+      password_hash text NOT NULL,
+      created_at    timestamptz NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS companies (
       id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      name       text NOT NULL UNIQUE,
+      name       text NOT NULL,
       website    text,
       created_at timestamptz NOT NULL DEFAULT now()
     );
+
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS name text;
+
+    -- Each user sees only the companies they created. Names are unique per owner.
+    ALTER TABLE companies ADD COLUMN IF NOT EXISTS owner_id uuid REFERENCES users(id) ON DELETE CASCADE;
+    ALTER TABLE companies DROP CONSTRAINT IF EXISTS companies_name_key;
+    CREATE UNIQUE INDEX IF NOT EXISTS companies_owner_name_key ON companies (owner_id, name);
+    CREATE INDEX IF NOT EXISTS companies_owner_idx ON companies (owner_id);
 
     CREATE TABLE IF NOT EXISTS employees (
       id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -67,19 +82,58 @@ export function createRepository(pool) {
       await pool.query('SELECT 1');
     },
 
-    async listCompanies() {
+    async createUser({ email, passwordHash }) {
+      const { rows } = await pool.query(
+        'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email, created_at',
+        [email, passwordHash],
+      );
+      return rows[0];
+    },
+
+    async findUserByEmail(email) {
+      const { rows } = await pool.query('SELECT id, email, password_hash FROM users WHERE email = $1', [email]);
+      return rows[0] ?? null;
+    },
+
+    async getUser(id) {
+      const { rows } = await pool.query('SELECT id, email, name, created_at FROM users WHERE id = $1', [id]);
+      return rows[0] ?? null;
+    },
+
+    async updateUserName(id, name) {
+      const { rows } = await pool.query(
+        'UPDATE users SET name = $2 WHERE id = $1 RETURNING id, email, name, created_at',
+        [id, name],
+      );
+      return rows[0] ?? null;
+    },
+
+    async getUserPasswordHash(id) {
+      const { rows } = await pool.query('SELECT password_hash FROM users WHERE id = $1', [id]);
+      return rows[0]?.password_hash ?? null;
+    },
+
+    async setUserPasswordHash(id, passwordHash) {
+      await pool.query('UPDATE users SET password_hash = $2 WHERE id = $1', [id, passwordHash]);
+    },
+
+    async listCompanies(ownerId) {
       const { rows } = await pool.query(`
         SELECT c.id, c.name, c.website, c.created_at, (c.icon IS NOT NULL) AS has_icon,
                count(e.id)::int AS employee_count
         FROM companies c
         LEFT JOIN employees e ON e.company_id = c.id
+        WHERE c.owner_id = $1
         GROUP BY c.id
-        ORDER BY lower(c.name)`);
+        ORDER BY lower(c.name)`, [ownerId]);
       return rows;
     },
 
-    async getCompany(id) {
-      const { rows } = await pool.query(`SELECT ${COMPANY_COLUMNS} FROM companies WHERE id = $1`, [id]);
+    async getCompany(id, ownerId) {
+      const { rows } = await pool.query(
+        `SELECT ${COMPANY_COLUMNS} FROM companies WHERE id = $1 AND owner_id = $2`,
+        [id, ownerId],
+      );
       return rows[0] ?? null;
     },
 
@@ -92,10 +146,10 @@ export function createRepository(pool) {
       await pool.query('UPDATE companies SET icon = $2 WHERE id = $1', [id, icon]);
     },
 
-    async createCompany({ name, website }) {
+    async createCompany({ name, website }, ownerId) {
       const { rows } = await pool.query(
-        `INSERT INTO companies (name, website) VALUES ($1, $2) RETURNING ${COMPANY_COLUMNS}`,
-        [name, website],
+        `INSERT INTO companies (name, website, owner_id) VALUES ($1, $2, $3) RETURNING ${COMPANY_COLUMNS}`,
+        [name, website, ownerId],
       );
       return rows[0];
     },
@@ -120,15 +174,20 @@ export function createRepository(pool) {
       return rows;
     },
 
-    async getEmployee(id) {
-      const { rows } = await pool.query('SELECT * FROM employees WHERE id = $1', [id]);
+    // Returns the employee only if its company belongs to ownerId.
+    async getEmployee(id, ownerId) {
+      const { rows } = await pool.query(
+        `SELECT e.* FROM employees e JOIN companies c ON c.id = e.company_id
+         WHERE e.id = $1 AND c.owner_id = $2`,
+        [id, ownerId],
+      );
       return rows[0] ?? null;
     },
 
     // Joins the company so a public request needs only one query.
     async getEmployeeByToken(token) {
       const { rows } = await pool.query(
-        `SELECT e.*, json_build_object('id', c.id, 'name', c.name, 'website', c.website) AS company
+        `SELECT e.*, json_build_object('id', c.id, 'name', c.name, 'website', c.website, 'has_icon', c.icon IS NOT NULL) AS company
          FROM employees e JOIN companies c ON c.id = e.company_id
          WHERE e.token = $1`,
         [token],

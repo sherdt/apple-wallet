@@ -34,12 +34,12 @@ export function html(strings, ...values) {
   return raw(out);
 }
 
-const header = (nav, headerTitle) =>
+const header = (nav, headerTitle, headerIcon) =>
   headerTitle
-    ? html`<header class="top branded"><span class="brand">${headerTitle}</span></header>`
+    ? html`<header class="top branded"><span class="brand">${headerIcon ? html`<img class="brand-icon" src="${headerIcon}" alt="" width="28" height="28">` : ''}${headerTitle}</span></header>`
     : html`<header class="top">${nav ? html`<a class="brand" href="/admin">Wallet cards</a>` : ''}</header>`;
 
-const layout = ({ title, body, nav = true, headerTitle }) => html`<!doctype html>
+const layout = ({ title, body, nav = true, headerTitle, headerIcon }) => html`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -49,7 +49,7 @@ const layout = ({ title, body, nav = true, headerTitle }) => html`<!doctype html
   <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>
-  ${header(nav, headerTitle)}
+  ${header(nav, headerTitle, headerIcon)}
   <main>${body}</main>
 </body>
 </html>`;
@@ -59,20 +59,21 @@ export const publicCardPage = ({ employee, company }) =>
     title: `${employee.name}`,
     nav: false,
     headerTitle: company.name,
+    headerIcon: company.has_icon ? `/admin/icons/${company.id}` : null,
     body: html`
-      <article class="business-card">
-        <h1>${employee.name}</h1>
-        ${employee.job_title ? html`<p>${employee.job_title}</p>` : ''}
-        <ul class="contact">
-          ${employee.email ? html`<li><a href="mailto:${employee.email}">${employee.email}</a></li>` : ''}
-          ${employee.mobile ? html`<li><a href="tel:${employee.mobile}">${employee.mobile} (mobile)</a></li>` : ''}
-          ${company.website ? html`<li><a href="${company.website}" rel="noopener">${company.website}</a></li>` : ''}
+      <article class="pcard">
+        <h1 class="pcard-name">${employee.name}</h1>
+        ${employee.job_title ? html`<p class="pcard-title">${employee.job_title}</p>` : ''}
+        <ul class="pcard-links">
+          ${employee.email ? html`<li><span class="pcard-label">Email</span><a href="mailto:${employee.email}">${employee.email}</a></li>` : ''}
+          ${employee.mobile ? html`<li><span class="pcard-label">Mobile</span><a href="tel:${employee.mobile}">${employee.mobile}</a></li>` : ''}
+          ${company.website ? html`<li><span class="pcard-label">Web</span><a href="${company.website}" rel="noopener">${company.website}</a></li>` : ''}
         </ul>
-        <div class="actions">
-          <a class="button" href="/p/${employee.token}.pkpass">Add to Apple Wallet</a>
-          <a class="button secondary" href="/p/${employee.token}.vcf">Save contact</a>
+        <div class="pcard-actions">
+          <a class="pcard-btn primary" href="/p/${employee.token}.pkpass">Add to Apple Wallet</a>
+          <a class="pcard-btn" href="/p/${employee.token}.vcf">Save contact</a>
         </div>
-        <p class="hint">“Add to Apple Wallet” works on iPhone and iPad. “Save contact” adds the details to your address book.</p>
+        <p class="pcard-note">Apple Wallet works on iPhone and iPad. Save contact adds this card to your address book.</p>
       </article>`,
   });
 

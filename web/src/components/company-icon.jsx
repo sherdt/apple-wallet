@@ -13,7 +13,7 @@ export function CompanyIcon({ company, className }) {
   }
   return (
     <div className={box}>
-      <img src={`/admin/api/companies/${company.id}/icon`} alt="" className="size-full object-contain" />
+      <img src={`/admin/icons/${company.id}`} alt="" className="size-full object-contain" />
     </div>
   );
 }

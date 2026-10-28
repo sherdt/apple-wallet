@@ -8,14 +8,20 @@ function requireEnv(env, name) {
   return value;
 }
 
+// HS256 needs a long random key; a short one would make forged tokens cheap to brute-force.
+function requireJwtSecret(env) {
+  const secret = requireEnv(env, 'JWT_SECRET');
+  if (secret.length < 32) throw new Error('JWT_SECRET must be at least 32 characters');
+  return secret;
+}
+
 export function readConfig(env = process.env) {
   return {
     port: Number(env.PORT ?? 3000),
     publicOrigin: requireEnv(env, 'PUBLIC_ORIGIN').replace(/\/+$/, ''),
     passTypeIdentifier: requireEnv(env, 'PASS_TYPE_IDENTIFIER'),
     teamIdentifier: requireEnv(env, 'TEAM_IDENTIFIER'),
-    adminUser: requireEnv(env, 'ADMIN_USER'),
-    adminPassword: requireEnv(env, 'ADMIN_PASSWORD'),
+    jwtSecret: requireJwtSecret(env),
     certDir: env.WALLET_CERT_DIR ?? '/certs',
   };
 }

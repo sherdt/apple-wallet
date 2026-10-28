@@ -1,10 +1,11 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
+import fastifyJwt from '@fastify/jwt';
 import fastifyStatic from '@fastify/static';
+import { hashPassword, validateCredentials, validateNewPassword, verifyPassword } from './auth.js';
 import { buildPass } from './pass.js';
 import { fetchCompanyIcon, passIcons } from './icon.js';
 import { buildVCard } from './vcard.js';
@@ -13,28 +14,17 @@ import * as views from './views.js';
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const ADMIN_DIR = join(PUBLIC_DIR, 'admin');
+const NAME_MAX = 120;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DUPLICATE_COMPANY = 'A company with this name already exists.';
 const STATIC_ASSETS = {
   '/assets/app.css': { file: 'app.css', type: 'text/css; charset=utf-8' },
 };
 
-const digest = (value) => createHash('sha256').update(value).digest();
-const safeEqual = (a, b) => timingSafeEqual(digest(a), digest(b));
-
-// Returns true only if the Authorization header carries the configured credentials.
-// Both comparisons always run, so a failing username does not short-circuit the check.
-function isAuthorized(header, { adminUser, adminPassword }) {
-  if (!header?.startsWith('Basic ')) return false;
-  const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
-  const sep = decoded.indexOf(':');
-  if (sep < 0) return false;
-  const user = decoded.slice(0, sep);
-  const pass = decoded.slice(sep + 1);
-  const userOk = safeEqual(user, adminUser);
-  const passOk = safeEqual(pass, adminPassword);
-  return userOk && passOk;
-}
+const API = '/admin/api';
+const PUBLIC_API = new Set([`${API}/auth/register`, `${API}/auth/login`]);
+const INVALID_LOGIN = 'Invalid email or password.';
+const EMAIL_TAKEN = 'An account with this email already exists.';
 
 const slugify = (text) =>
   text
@@ -57,22 +47,29 @@ export async function buildApp({ config, repo, certificates, icons }) {
   const adminBuilt = existsSync(join(ADMIN_DIR, 'index.html'));
 
   const app = Fastify({ logger: true, trustProxy: true, bodyLimit: 16 * 1024 });
+  await app.register(fastifyJwt, { secret: config.jwtSecret, sign: { expiresIn: '12h' } });
+
+  // Hashing a dummy value for unknown emails keeps login timing independent of account existence.
+  const dummyHash = await hashPassword('not-a-real-password');
+
+  const signToken = (user) => app.jwt.sign({ sub: user.id, email: user.email });
 
   app.addHook('onRequest', async (request, reply) => {
     if (!request.url.startsWith('/admin')) return;
-    if (!isAuthorized(request.headers.authorization, config)) {
-      return reply
-        .code(401)
-        .header('WWW-Authenticate', 'Basic realm="Wallet admin", charset="UTF-8"')
-        .type('text/plain')
-        .send('Authentication required');
-    }
     // Browsers send Origin on writes. Reject writes that come from another site.
     if (request.method !== 'GET' && request.headers.origin !== undefined &&
         request.headers.origin !== config.publicOrigin) {
       return reply.code(403).send({
         error: `Blocked: this request came from ${request.headers.origin}. Open the admin at ${config.publicOrigin}.`,
       });
+    }
+    // The SPA shell and assets are public; only the JSON API needs a token.
+    const path = request.url.split('?')[0];
+    if (!path.startsWith(`${API}/`) || PUBLIC_API.has(path)) return;
+    try {
+      await request.jwtVerify();
+    } catch {
+      return reply.code(401).send({ error: 'Authentication required.' });
     }
   });
 
@@ -108,14 +105,15 @@ export async function buildApp({ config, repo, certificates, icons }) {
     return reply.code(404).type('text/plain').send('Not found');
   });
 
-  async function findCompany(id, reply) {
-    const company = UUID.test(id) ? await repo.getCompany(id) : null;
+  // Missing and foreign records both return 404, so IDs of other users' data are not revealed.
+  async function findCompany(id, reply, ownerId) {
+    const company = UUID.test(id) ? await repo.getCompany(id, ownerId) : null;
     if (!company) reply.code(404);
     return company;
   }
 
-  async function findEmployee(id, reply) {
-    const employee = UUID.test(id) ? await repo.getEmployee(id) : null;
+  async function findEmployee(id, reply, ownerId) {
+    const employee = UUID.test(id) ? await repo.getEmployee(id, ownerId) : null;
     if (!employee) reply.code(404);
     return employee;
   }
@@ -141,7 +139,7 @@ export async function buildApp({ config, repo, certificates, icons }) {
 
   // ---- Admin API (JSON) ----
 
-  const api = '/admin/api';
+  const api = API;
   const validationError = (reply, { errors, fieldErrors }) => reply.code(400).send({ errors, fieldErrors });
 
   // Stores the icon fetched from the website, or clears it when none is found.
@@ -151,13 +149,84 @@ export async function buildApp({ config, repo, certificates, icons }) {
     return icon !== null;
   }
 
-  app.get(`${api}/companies`, async () => repo.listCompanies());
+  // ---- Accounts ----
+  // Every registered user is an admin of their own companies.
+
+  app.post(`${api}/auth/register`, async (request, reply) => {
+    const checked = validateCredentials(request.body ?? {});
+    if (checked.errors.length) return validationError(reply, checked);
+    try {
+      const user = await repo.createUser({
+        email: checked.values.email,
+        passwordHash: await hashPassword(checked.values.password),
+      });
+      return reply.code(201).send({ token: signToken(user), user });
+    } catch (err) {
+      if (!isUniqueViolation(err)) throw err;
+      return reply.code(409).send({ errors: [EMAIL_TAKEN], fieldErrors: { email: EMAIL_TAKEN } });
+    }
+  });
+
+  app.post(`${api}/auth/login`, async (request, reply) => {
+    const email = String(request.body?.email ?? '').trim().toLowerCase();
+    const password = String(request.body?.password ?? '');
+    if (!email || !password) return reply.code(400).send({ errors: ['Email and password are required.'] });
+    const user = await repo.findUserByEmail(email);
+    const ok = await verifyPassword(password, user?.password_hash ?? dummyHash);
+    if (!user || !ok) return reply.code(401).send({ error: INVALID_LOGIN });
+    return { token: signToken(user), user: { id: user.id, email: user.email } };
+  });
+
+  app.get(`${api}/auth/me`, async (request, reply) => {
+    const user = await repo.getUser(request.user.sub);
+    if (!user) return reply.code(401).send({ error: 'Authentication required.' });
+    return user;
+  });
+
+  app.put(`${api}/auth/profile`, async (request, reply) => {
+    const name = String(request.body?.name ?? '').trim();
+    const fieldErrors = {};
+    if (!name) fieldErrors.name = 'Name is required.';
+    else if (name.length > NAME_MAX) fieldErrors.name = `Name must be at most ${NAME_MAX} characters.`;
+    if (Object.keys(fieldErrors).length) {
+      return reply.code(400).send({ errors: Object.values(fieldErrors), fieldErrors });
+    }
+    const user = await repo.updateUserName(request.user.sub, name);
+    if (!user) return reply.code(401).send({ error: 'Authentication required.' });
+    return user;
+  });
+
+  app.post(`${api}/auth/change-password`, async (request, reply) => {
+    const body = request.body ?? {};
+    const currentPassword = String(body.currentPassword ?? '');
+    const newPassword = String(body.newPassword ?? '');
+    const fieldErrors = validateNewPassword(newPassword, String(body.confirmPassword ?? ''), {
+      password: 'newPassword',
+      confirm: 'confirmPassword',
+    });
+    if (!currentPassword) fieldErrors.currentPassword = 'Current password is required.';
+    if (Object.keys(fieldErrors).length) {
+      return reply.code(400).send({ errors: Object.values(fieldErrors), fieldErrors });
+    }
+    const storedHash = await repo.getUserPasswordHash(request.user.sub);
+    if (!storedHash) return reply.code(401).send({ error: 'Authentication required.' });
+    if (!(await verifyPassword(currentPassword, storedHash))) {
+      const message = 'Current password is incorrect.';
+      return reply.code(400).send({ errors: [message], fieldErrors: { currentPassword: message } });
+    }
+    await repo.setUserPasswordHash(request.user.sub, await hashPassword(newPassword));
+    return reply.code(204).send();
+  });
+
+  // ---- Companies ----
+
+  app.get(`${api}/companies`, async (request) => repo.listCompanies(request.user.sub));
 
   app.post(`${api}/companies`, async (request, reply) => {
     const checked = validateCompany(request.body ?? {});
     if (checked.errors.length) return validationError(reply, checked);
     try {
-      const company = await repo.createCompany(checked.values);
+      const company = await repo.createCompany(checked.values, request.user.sub);
       company.has_icon = await refreshIcon(company);
       return reply.code(201).send(company);
     } catch (err) {
@@ -167,13 +236,13 @@ export async function buildApp({ config, repo, certificates, icons }) {
   });
 
   app.get(`${api}/companies/:id`, async (request, reply) => {
-    const company = await findCompany(request.params.id, reply);
+    const company = await findCompany(request.params.id, reply, request.user.sub);
     if (!company) return notFound(reply, 'Company');
     return { company, employees: await repo.listEmployees(company.id) };
   });
 
   app.put(`${api}/companies/:id`, async (request, reply) => {
-    const company = await findCompany(request.params.id, reply);
+    const company = await findCompany(request.params.id, reply, request.user.sub);
     if (!company) return notFound(reply, 'Company');
     const checked = validateCompany(request.body ?? {});
     if (checked.errors.length) return validationError(reply, checked);
@@ -187,29 +256,29 @@ export async function buildApp({ config, repo, certificates, icons }) {
     }
   });
 
-  app.get(`${api}/companies/:id/icon`, async (request, reply) => {
-    const company = await findCompany(request.params.id, reply);
-    if (!company) return notFound(reply, 'Company');
-    const icon = await repo.getCompanyIcon(company.id);
+  // Served outside the JWT-protected API because <img> tags cannot send a Bearer token.
+  // The company id is a random UUID and the icon is public data fetched from the company website.
+  app.get('/admin/icons/:id', async (request, reply) => {
+    const icon = UUID.test(request.params.id) ? await repo.getCompanyIcon(request.params.id) : null;
     if (!icon) return reply.code(404).send({ errors: ['No icon'] });
-    return reply.type('image/png').header('Cache-Control', 'no-store').send(icon);
+    return reply.type('image/png').header('Cache-Control', 'private, max-age=300').send(icon);
   });
 
   app.post(`${api}/companies/:id/icon`, async (request, reply) => {
-    const company = await findCompany(request.params.id, reply);
+    const company = await findCompany(request.params.id, reply, request.user.sub);
     if (!company) return notFound(reply, 'Company');
     return { has_icon: await refreshIcon(company) };
   });
 
   app.delete(`${api}/companies/:id`, async (request, reply) => {
-    const company = await findCompany(request.params.id, reply);
+    const company = await findCompany(request.params.id, reply, request.user.sub);
     if (!company) return notFound(reply, 'Company');
     await repo.deleteCompany(company.id);
     return reply.code(204).send();
   });
 
   app.post(`${api}/companies/:id/employees`, async (request, reply) => {
-    const company = await findCompany(request.params.id, reply);
+    const company = await findCompany(request.params.id, reply, request.user.sub);
     if (!company) return notFound(reply, 'Company');
     const checked = validateEmployee(request.body ?? {});
     if (checked.errors.length) return validationError(reply, checked);
@@ -218,14 +287,14 @@ export async function buildApp({ config, repo, certificates, icons }) {
 
   // Returns the employee with its company and the public origin, so the client can build card links.
   app.get(`${api}/employees/:id`, async (request, reply) => {
-    const employee = await findEmployee(request.params.id, reply);
+    const employee = await findEmployee(request.params.id, reply, request.user.sub);
     if (!employee) return notFound(reply, 'Employee');
-    const company = await repo.getCompany(employee.company_id);
+    const company = await repo.getCompany(employee.company_id, request.user.sub);
     return { employee, company, origin: config.publicOrigin };
   });
 
   app.put(`${api}/employees/:id`, async (request, reply) => {
-    const employee = await findEmployee(request.params.id, reply);
+    const employee = await findEmployee(request.params.id, reply, request.user.sub);
     if (!employee) return notFound(reply, 'Employee');
     const checked = validateEmployee(request.body ?? {});
     if (checked.errors.length) return validationError(reply, checked);
@@ -233,13 +302,13 @@ export async function buildApp({ config, repo, certificates, icons }) {
   });
 
   app.post(`${api}/employees/:id/rotate-token`, async (request, reply) => {
-    const employee = await findEmployee(request.params.id, reply);
+    const employee = await findEmployee(request.params.id, reply, request.user.sub);
     if (!employee) return notFound(reply, 'Employee');
     return repo.rotateEmployeeToken(employee.id);
   });
 
   app.delete(`${api}/employees/:id`, async (request, reply) => {
-    const employee = await findEmployee(request.params.id, reply);
+    const employee = await findEmployee(request.params.id, reply, request.user.sub);
     if (!employee) return notFound(reply, 'Employee');
     await repo.deleteEmployee(employee.id);
     return reply.code(204).send();

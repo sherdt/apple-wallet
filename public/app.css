@@ -4,7 +4,7 @@
   --line: #d2d2d7;
   --accent: #0a6ebd;
   --danger: #b3261e;
-  --brand: var(--accent);
+  --brand: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color: var(--ink);
   background: #f5f5f7;
@@ -34,18 +34,7 @@ form + form { margin-top: 0.5rem; }
 .notice { background: #e7f5ea; border: 1px solid #b7e1c1; padding: 0.6rem 0.8rem; border-radius: 6px; }
 .errors { background: #fdecea; border: 1px solid #f5c2bd; padding: 0.6rem 1.2rem; border-radius: 6px; color: var(--danger); }
 .links { line-height: 1.8; }
-.business-card {
-  max-width: 420px; margin: 2rem auto; background: #fff; border-radius: 16px; overflow: hidden;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);
-}
-.business-card::before { content: ""; display: block; height: 0.6rem; background: var(--brand); }
-.business-card > * { margin-left: 1.5rem; margin-right: 1.5rem; }
-.business-card h1 { margin-bottom: 0.25rem; }
-.business-card .company { color: var(--brand); font-weight: 600; margin-top: 1.5rem; }
-.contact { list-style: none; padding: 0; line-height: 1.9; }
-.actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.5rem; }
-.actions .button { background: var(--brand); }
-.actions .button.secondary { background: #e8e8ed; color: var(--ink); }
+.brand-icon { vertical-align: middle; margin-right: 0.6rem; border-radius: 6px; }
 @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
 
 /* ---- UX pass: layout, forms, and feedback ---- */
@@ -74,19 +63,37 @@ input[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 1px 
 .link-row { display: grid; grid-template-columns: 9rem 1fr auto auto; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; }
 .link-row input { min-width: 0; font-family: ui-monospace, Menlo, monospace; font-size: 0.85rem; background: #f5f5f7; }
 .link-row a { font-size: 0.9rem; }
-.actions { margin-bottom: 0.5rem; margin-top: 1.25rem; }
-.actions .button { text-align: center; }
-.contact a { overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   main { padding: 1rem; }
   .hide-sm { display: none; }
   .link-row { grid-template-columns: 1fr auto; }
   .link-row .link-label { grid-column: 1 / -1; font-weight: 600; }
   .link-row input { grid-column: 1 / -1; }
-  .actions .button { flex: 1 1 100%; }
   .search { flex-direction: column; }
 }
 .details { display: grid; grid-template-columns: max-content 1fr; gap: 0.5rem 1.25rem; margin: 0 0 1.5rem; background: #fff; border-radius: 8px; padding: 1rem; }
 .details dt { color: var(--muted, #6b6b75); }
 .details dd { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 480px) { .details { grid-template-columns: 1fr; gap: 0.1rem; } .details dd { margin-bottom: 0.6rem; } }
+
+/* ---- Public card ---- */
+.pcard {
+  max-width: 380px; margin: 2.5rem auto; padding: 2rem 1.75rem; background: #fff;
+  border-radius: 20px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+}
+.pcard-name { font-size: 1.75rem; line-height: 1.2; margin: 0 0 0.25rem; letter-spacing: -0.01em; }
+.pcard-title { color: var(--muted); margin: 0 0 1.5rem; }
+.pcard-links { list-style: none; padding: 0; margin: 0 0 1.75rem; display: grid; gap: 0.9rem; }
+.pcard-links li { display: grid; gap: 0.15rem; }
+.pcard-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.pcard-links a { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; text-decoration: none; }
+.pcard-links a:hover { text-decoration: underline; }
+.pcard-actions { display: grid; gap: 0.6rem; }
+.pcard-btn {
+  display: flex; align-items: center; justify-content: center; height: 3rem; box-sizing: border-box;
+  border-radius: 12px; background: #e8e8ed; color: var(--ink); font-weight: 600; text-decoration: none;
+}
+.pcard-btn.primary { background: var(--ink); color: #fff; }
+.pcard-btn:hover { filter: brightness(0.95); }
+.pcard-note { color: var(--muted); font-size: 0.85rem; line-height: 1.5; margin: 1.25rem 0 0; text-align: center; }
+@media (max-width: 480px) { .pcard { margin: 1rem; padding: 1.5rem 1.25rem; } }

@@ -11,7 +11,7 @@ PRODYNA SE.
 | `PUBLIC_ORIGIN` | Public base URL, e.g. `https://vcard.sherdt.de`. Non-GET admin requests must come from this origin. |
 | `PASS_TYPE_IDENTIFIER` | Pass Type ID from the Apple Developer portal. |
 | `TEAM_IDENTIFIER` | Apple Developer Team ID. |
-| `ADMIN_USER`, `ADMIN_PASSWORD` | Basic-auth credentials for `/admin`. |
+| `JWT_SECRET` | HMAC key for admin login tokens. At least 32 characters, e.g. `openssl rand -base64 48`. |
 | `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGSSLMODE` | PostgreSQL connection (standard `pg` variables). |
 | `WALLET_CERT_DIR` | Directory with the Apple certificates (default `/certs`). |
 | `PORT` | HTTP port (default `3000`). |
@@ -51,7 +51,7 @@ Requires Node 22.9+ and Docker.
    ```
 
    `.env` is read automatically by `npm start`. It is git-ignored. The defaults
-   match the PostgreSQL container above and the admin login `admin` / `change-me`.
+   match the PostgreSQL container above. Set `JWT_SECRET` to a random value.
    `PUBLIC_ORIGIN` must match the URL you open in the browser: the admin area
    rejects non-GET requests from any other origin (CSRF protection).
 
@@ -76,7 +76,8 @@ Requires Node 22.9+ and Docker.
    npm start
    ```
 
-   Open http://localhost:3000/admin. To rebuild the UI on every change, run
+   Open http://localhost:3000/admin and register an account. Every registered
+   account is an administrator and sees only the companies it created. To rebuild the UI on every change, run
    `npm run dev:web` in a second terminal. To reach the app from other devices on
    your network (e.g. an iPhone), set `PUBLIC_ORIGIN` in `.env` to
    `http://<your-LAN-ip>:3000` and open that URL instead of localhost.

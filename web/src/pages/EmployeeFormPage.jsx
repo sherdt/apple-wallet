@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
+import { Trash2 } from 'lucide-react';
 import { api, ApiError } from '../lib/api.js';
 import { useAsync } from '../lib/useAsync.js';
 import { Button } from '../components/ui/button.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { Card, CardContent } from '../components/ui/card.jsx';
 import { Field, PageHeader, Spinner } from '../components/form.jsx';
+import { ConfirmDialog } from '../components/ui/confirm-dialog.jsx';
 import { ErrorAlert } from '../components/notice.jsx';
 
 export function EmployeeFormPage() {
@@ -45,6 +47,8 @@ function EmployeeForm({ id, company, initial }) {
   const [error, setError] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const set = (field) => (e) => setValues((v) => ({ ...v, [field]: e.target.value }));
 
@@ -64,6 +68,18 @@ function EmployeeForm({ id, company, initial }) {
       setError(err);
       if (err instanceof ApiError) setFieldErrors(err.fieldErrors);
       setSaving(false);
+    }
+  }
+
+  async function deleteEmployee() {
+    setDeleting(true);
+    setError(null);
+    try {
+      await api.employees.remove(id);
+      navigate(`/companies/${company.id}`, { state: { notice: `${initial?.name ?? 'Employee'} was removed.` } });
+    } catch (err) {
+      setError(err);
+      setDeleting(false);
     }
   }
 
@@ -112,6 +128,32 @@ function EmployeeForm({ id, company, initial }) {
           </form>
         </CardContent>
       </Card>
+
+      {editing ? (
+        <Card className="mt-10 max-w-xl border-destructive/40">
+          <CardContent className="flex flex-col gap-4 pt-6 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="font-semibold text-destructive">Danger zone</h2>
+              <p className="text-sm text-muted-foreground">
+                Deleting this employee also removes their card link. This cannot be undone.
+              </p>
+            </div>
+            <Button variant="destructive" onClick={() => setConfirmOpen(true)} className="shrink-0">
+              <Trash2 />Delete employee
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        busy={deleting}
+        title={`Delete ${initial?.name ?? 'employee'}?`}
+        description="The employee and their card link are removed. This cannot be undone."
+        confirmLabel="Delete employee"
+        onConfirm={deleteEmployee}
+      />
     </>
   );
 }

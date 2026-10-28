@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router';
-import { Check, Copy, Download, ExternalLink, Pencil, RefreshCw, Trash2, Wallet } from 'lucide-react';
+import { Link, useLocation, useParams } from 'react-router';
+import { ArrowLeft, Check, Copy, Download, ExternalLink, Pencil, RefreshCw, Wallet } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAsync } from '../lib/useAsync.js';
 import { Button } from '../components/ui/button.jsx';
@@ -14,9 +14,8 @@ import { ErrorAlert, SuccessAlert } from '../components/notice.jsx';
 export function EmployeePage() {
   const { id } = useParams();
   const notice = useLocation().state?.notice;
-  const navigate = useNavigate();
   const detail = useAsync(() => api.employees.get(id), [id]);
-  const [dialog, setDialog] = useState(null); // 'rotate' | 'delete' | null
+  const [dialog, setDialog] = useState(null); // 'rotate' | null
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -48,20 +47,17 @@ export function EmployeePage() {
       detail.reload();
     });
 
-  const remove = () =>
-    run(async () => {
-      await api.employees.remove(employee.id);
-      navigate(`/companies/${company.id}`, { state: { notice: `${employee.name} was removed.` } });
-    });
-
   return (
     <>
+      <Link
+        to={`/companies/${company.id}`}
+        className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="size-4" />Back to {company.name} employees
+      </Link>
       <PageHeader title={employee.name} description={[employee.job_title, company.name].filter(Boolean).join(' · ')}>
         <Button variant="outline" asChild>
           <Link to={`/employees/${employee.id}/edit`}><Pencil />Edit</Link>
-        </Button>
-        <Button variant="destructive" onClick={() => setDialog('delete')}>
-          <Trash2 />Delete
         </Button>
       </PageHeader>
 
@@ -126,15 +122,6 @@ export function EmployeePage() {
         description="The current link and any Wallet pass created from it stop working. A new link is generated."
         confirmLabel="Revoke link"
         onConfirm={rotate}
-      />
-      <ConfirmDialog
-        open={dialog === 'delete'}
-        onOpenChange={(open) => !open && setDialog(null)}
-        busy={busy}
-        title={`Delete ${employee.name}?`}
-        description="The employee and their card link are removed. This cannot be undone."
-        confirmLabel="Delete employee"
-        onConfirm={remove}
       />
     </>
   );

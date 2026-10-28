@@ -1,3 +1,5 @@
+import { session } from './session.js';
+
 export class ApiError extends Error {
   constructor(message, { status, errors = [], fieldErrors = {} } = {}) {
     super(message);
@@ -10,6 +12,8 @@ export class ApiError extends Error {
 
 async function request(method, path, body) {
   const init = { method, credentials: 'same-origin', headers: {} };
+  const token = session.get();
+  if (token) init.headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
@@ -17,6 +21,12 @@ async function request(method, path, body) {
   const res = await fetch(`/admin/api${path}`, init);
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
+  // An expired or invalid token ends the session; login/register failures are handled by the caller.
+  if (res.status === 401 && !path.startsWith('/auth/')) {
+    session.clear();
+    window.location.replace('/admin/login');
+    return null;
+  }
   if (!res.ok) {
     const errors = data.errors ?? (data.error ? [data.error] : []);
     throw new ApiError(errors.join(' ') || `Request failed (${res.status}).`, {
@@ -29,6 +39,13 @@ async function request(method, path, body) {
 }
 
 export const api = {
+  auth: {
+    register: (values) => request('POST', '/auth/register', values),
+    login: (values) => request('POST', '/auth/login', values),
+    me: () => request('GET', '/auth/me'),
+    updateProfile: (values) => request('PUT', '/auth/profile', values),
+    changePassword: (values) => request('POST', '/auth/change-password', values),
+  },
   companies: {
     list: () => request('GET', '/companies'),
     get: (id) => request('GET', `/companies/${id}`),

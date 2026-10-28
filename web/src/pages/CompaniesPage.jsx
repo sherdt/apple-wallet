@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router';
-import { Plus, Search, Users } from 'lucide-react';
+import { Building2, Plus, Search, Users } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAsync } from '../lib/useAsync.js';
 import { Button } from '../components/ui/button.jsx';
@@ -23,9 +23,11 @@ export function CompaniesPage() {
   return (
     <>
       <PageHeader title="Companies" description="Each company holds its employees and their Wallet cards.">
-        <Button asChild>
-          <Link to="/companies/new"><Plus />New company</Link>
-        </Button>
+        {companies.data?.length > 0 ? (
+          <Button asChild>
+            <Link to="/companies/new"><Plus />New company</Link>
+          </Button>
+        ) : null}
       </PageHeader>
 
       <SuccessAlert message={notice} />
@@ -35,17 +37,19 @@ export function CompaniesPage() {
 
       {companies.data ? (
         <>
-          <div className="relative mb-6 max-w-sm">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              aria-label="Search companies"
-              placeholder="Search companies…"
-              className="pl-9"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
+          {companies.data.length > 0 ? (
+            <div className="relative mb-6 max-w-sm">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="search"
+                aria-label="Search companies"
+                placeholder="Search companies…"
+                className="pl-9"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+          ) : null}
 
           {companies.data.length === 0 ? (
             <Card className="flex flex-col items-center gap-3 py-16 text-center">

@@ -24,6 +24,7 @@ export async function loadIcons() {
 
 const field = (key, label, value) => (value ? { key, label, value } : null);
 const present = (fields) => fields.filter(Boolean);
+const contactLine = (employee) => [employee.mobile, employee.email].filter(Boolean).join(' · ') || null;
 
 export function describePass({ employee, company, config }) {
   const fullName = employee.name;
@@ -42,9 +43,8 @@ export function describePass({ employee, company, config }) {
       // Empty primary field keeps the text clear of the strip image.
       headerFields: present([field('headerName', ' ', fullName)]),
       primaryFields: [{ key: 'spacer', label: ' ', value: ' ' }],
-      // The label holds the name or position, the value holds the email or phone.
-      secondaryFields: present([field('name', fullName, employee.email)]),
-      auxiliaryFields: present([field('position', employee.job_title, employee.mobile)]),
+      // The label holds the position, the value holds phone and email on one line.
+      secondaryFields: [{ key: 'position', label: employee.job_title || ' ', value: contactLine(employee) || ' ' }],
     },
   };
 }
