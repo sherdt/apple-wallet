@@ -45,6 +45,13 @@ export function describePass({ employee, company, config }) {
         field('email', 'E-MAIL', employee.email),
       ]),
       auxiliaryFields: present([field('website', 'WEBSITE', company.website)]),
+      backFields: present([
+        field('back-name', 'NAME', employee.name),
+        field('back-mobile', 'TELEFON', employee.mobile),
+        field('back-email', 'E-MAIL', employee.email),
+        field('back-website', 'WEB', company.website),
+        field('back-company', 'UNTERNEHMEN', [company.name, company.address].filter(Boolean).join('\n')),
+      ]),
     },
   };
 }
