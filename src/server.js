@@ -1,5 +1,6 @@
 import { buildApp } from './app.js';
-import { createPool, createRepository, migrate } from './db.js';
+import { backfillIconFlags, createPool, createRepository, migrate } from './db.js';
+import { isLightArtwork } from './icon.js';
 import { loadCertificates, loadIcons } from './pass.js';
 
 function requireEnv(env, name) {
@@ -30,6 +31,7 @@ async function main() {
   const config = readConfig();
   const pool = createPool();
   await migrate(pool);
+  await backfillIconFlags(pool, isLightArtwork);
 
   const app = await buildApp({
     config,

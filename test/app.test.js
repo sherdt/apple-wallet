@@ -560,6 +560,16 @@ test('API responses and public pages carry security headers', async () => {
   await app.close();
 });
 
+test('isLightArtwork flags logos whose visible pixels are mostly light', async () => {
+  const { isLightArtwork, renderSquare } = await import('../src/icon.js');
+  const white = await renderSquare(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#fff"/></svg>'), 32);
+  const black = await renderSquare(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#111"/></svg>'), 32);
+  const transparent = await renderSquare(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"/>'), 32);
+  assert.equal(await isLightArtwork(white), true);
+  assert.equal(await isLightArtwork(black), false);
+  assert.equal(await isLightArtwork(transparent), false);
+});
+
 test('normalizeIcon accepts an uploaded SVG and rejects other data', async () => {
   const { normalizeIcon } = await import('../src/icon.js');
   const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 256"><rect width="512" height="256" fill="red"/></svg>');

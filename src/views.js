@@ -83,9 +83,12 @@ export const publicCardPage = ({ employee, company }) =>
           var btn = document.getElementById('wallet-btn');
           var status = document.getElementById('wallet-status');
           var label = btn.textContent;
-          var timer;
+          var timer, poll;
+          var token = location.pathname.split('/').pop();
           function reset() {
             clearTimeout(timer);
+            clearInterval(poll);
+            document.cookie = 'pkpass_ready=; Path=/; Max-Age=0';
             btn.textContent = label;
             btn.classList.remove('busy');
             btn.removeAttribute('aria-disabled');
@@ -98,6 +101,10 @@ export const publicCardPage = ({ employee, company }) =>
             btn.setAttribute('aria-disabled', 'true');
             status.textContent = 'This can take a few seconds. Please wait.';
             timer = setTimeout(reset, 20000);
+            // The server sets pkpass_ready once the .pkpass response has been sent.
+            poll = setInterval(function () {
+              if (document.cookie.indexOf('pkpass_ready=' + token) !== -1) reset();
+            }, 500);
           });
           window.addEventListener('pageshow', reset);
         })();

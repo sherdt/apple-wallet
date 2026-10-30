@@ -81,7 +81,17 @@ export async function migrate(pool) {
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS linkedin text;
     -- Free-text location of the employee (for example an office), added to the vCard note.
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS location text;
+    -- True when the company logo is mostly light artwork and needs a dark backdrop. NULL when there is no logo.
+    ALTER TABLE companies ADD COLUMN IF NOT EXISTS icon_light boolean;
   `);
+}
+
+// Fills icon_light for logos stored before the flag existed.
+export async function backfillIconFlags(pool, isLight) {
+  const { rows } = await pool.query('SELECT id, icon FROM companies WHERE icon IS NOT NULL AND icon_light IS NULL');
+  for (const row of rows) {
+    await pool.query('UPDATE companies SET icon_light = $2 WHERE id = $1', [row.id, await isLight(row.icon)]);
+  }
 }
 
 // A user may manage a company if they created it or were added as an admin. $N is the user id placeholder.
@@ -95,7 +105,7 @@ export function newToken() {
 }
 
 // Everything except the icon bytes, which would bloat every JSON response.
-const COMPANY_COLUMNS = 'id, name, website, address, created_at, (icon IS NOT NULL) AS has_icon';
+const COMPANY_COLUMNS = 'id, name, website, address, created_at, (icon IS NOT NULL) AS has_icon, icon_light';
 
 // Everything except the photo bytes, which would bloat every JSON response.
 const EMPLOYEE_COLUMN_NAMES = ['id', 'company_id', 'name', 'job_title', 'email', 'mobile', 'linkedin', 'location', 'token', 'created_at'];
@@ -146,7 +156,7 @@ export function createRepository(pool) {
 
     async listCompanies(ownerId) {
       const { rows } = await pool.query(`
-        SELECT c.id, c.name, c.website, c.created_at, (c.icon IS NOT NULL) AS has_icon,
+        SELECT c.id, c.name, c.website, c.created_at, (c.icon IS NOT NULL) AS has_icon, c.icon_light,
                count(e.id)::int AS employee_count
         FROM companies c
         LEFT JOIN employees e ON e.company_id = c.id
@@ -169,8 +179,8 @@ export function createRepository(pool) {
       return rows[0]?.icon ?? null;
     },
 
-    async setCompanyIcon(id, icon) {
-      await pool.query('UPDATE companies SET icon = $2 WHERE id = $1', [id, icon]);
+    async setCompanyIcon(id, icon, light = null) {
+      await pool.query('UPDATE companies SET icon = $2, icon_light = $3 WHERE id = $1', [id, icon, icon ? light : null]);
     },
 
     async createCompany({ name, website, address }, ownerId) {

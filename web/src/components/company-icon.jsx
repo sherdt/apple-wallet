@@ -3,7 +3,12 @@ import { cn } from '../lib/utils.js';
 
 // Shows the uploaded company logo, or a placeholder when there is none.
 export function CompanyIcon({ company, className }) {
-  const box = cn('flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted', className);
+  // Light logos get a dark backdrop so white artwork stays visible.
+  const box = cn(
+    'flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg',
+    company.icon_light ? 'bg-neutral-900' : 'bg-muted',
+    className,
+  );
   if (!company.has_icon) {
     return (
       <div className={box}>

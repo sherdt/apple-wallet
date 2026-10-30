@@ -7,7 +7,7 @@ import fastifyJwt from '@fastify/jwt';
 import fastifyStatic from '@fastify/static';
 import { hashPassword, validateCredentials, validateNewPassword, verifyPassword } from './auth.js';
 import { buildPass } from './pass.js';
-import { normalizeIcon, passIcons } from './icon.js';
+import { isLightArtwork, normalizeIcon, passIcons } from './icon.js';
 import { buildVCard, photoUrl } from './vcard.js';
 import { validateCompany, validateEmployee } from './validation.js';
 import { normalizePhoto, photoDataUrl, passThumbnails } from './photo.js';
@@ -267,8 +267,9 @@ export async function buildApp({ config, repo, certificates, icons }) {
       const message = 'Logo must be an SVG, PNG, JPEG or WebP image.';
       return validationError(reply, { errors: [message], fieldErrors: { icon: message } });
     }
-    await repo.setCompanyIcon(company.id, icon);
-    return { has_icon: true };
+    const light = await isLightArtwork(icon);
+    await repo.setCompanyIcon(company.id, icon, light);
+    return { has_icon: true, icon_light: light };
   });
 
   app.delete(`${api}/companies/:id/icon`, async (request, reply) => {
@@ -426,6 +427,8 @@ export async function buildApp({ config, repo, certificates, icons }) {
       .type('application/vnd.apple.pkpass')
       .header('Content-Disposition', `attachment; filename="${slug}.pkpass"`)
       .header('Cache-Control', 'no-store')
+      // Lets the public card page detect that the download finished (see views.js).
+      .header('Set-Cookie', `pkpass_ready=${token}; Path=/; Max-Age=60; SameSite=Lax`)
       .send(body);
   });
 

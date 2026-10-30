@@ -25,6 +25,19 @@ export async function normalizeIcon(dataUrl) {
   }
 }
 
+// True when the visible artwork is mostly light (for example white text), so it needs a dark backdrop to be readable.
+export async function isLightArtwork(png) {
+  const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let total = 0;
+  let count = 0;
+  for (let i = 0; i < data.length; i += info.channels) {
+    if (data[i + 3] < 128) continue;
+    total += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    count += 1;
+  }
+  return count > 0 && total / count > 128;
+}
+
 // Fits the image inside a width x height box, keeping its proportions.
 // Transparent margins are trimmed and the artwork is aligned left, so it sits in the pass header's top-left corner.
 export async function renderBox(buffer, width, height) {

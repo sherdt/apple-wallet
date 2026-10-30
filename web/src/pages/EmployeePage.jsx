@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
 import { ArrowLeft, Check, Copy, Download, ExternalLink, Pencil, RefreshCw, User, Wallet } from 'lucide-react';
 import { api } from '../lib/api.js';
@@ -17,8 +17,27 @@ export function EmployeePage() {
   const detail = useAsync(() => api.employees.get(id), [id]);
   const [dialog, setDialog] = useState(null); // 'rotate' | null
   const [busy, setBusy] = useState(false);
+  const [walletBusy, setWalletBusy] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [success, setSuccess] = useState(null);
+
+  const walletToken = detail.data?.employee?.token;
+  // The server sets a pkpass_ready cookie once the .pkpass response is sent; poll for it to end the busy state.
+  useEffect(() => {
+    if (!walletBusy) return undefined;
+    const done = () => {
+      document.cookie = 'pkpass_ready=; Path=/; Max-Age=0';
+      setWalletBusy(false);
+    };
+    const poll = setInterval(() => {
+      if (document.cookie.includes(`pkpass_ready=${walletToken}`)) done();
+    }, 500);
+    const timer = setTimeout(done, 20000);
+    return () => {
+      clearInterval(poll);
+      clearTimeout(timer);
+    };
+  }, [walletBusy, walletToken]);
 
   if (detail.loading) return <Spinner />;
   if (detail.error) return <ErrorAlert error={detail.error} />;
@@ -114,7 +133,17 @@ export function EmployeePage() {
             <CopyField value={cardUrl} />
             <div className="flex flex-wrap gap-2">
               <Button asChild>
-                <a href={`${cardPath}.pkpass`}><Wallet />Add to Wallet</a>
+                <a
+                  href={`${cardPath}.pkpass`}
+                  aria-disabled={walletBusy || undefined}
+                  className={walletBusy ? 'pointer-events-none opacity-70' : undefined}
+                  onClick={(e) => {
+                    if (walletBusy) return e.preventDefault();
+                    setWalletBusy(true);
+                  }}
+                >
+                  <Wallet />{walletBusy ? 'Creating your card…' : 'Add to Wallet'}
+                </a>
               </Button>
               <Button variant="outline" asChild>
                 <a href={`${cardPath}.vcf`}><Download />Save contact</a>
@@ -122,7 +151,7 @@ export function EmployeePage() {
               <Button variant="outline" asChild>
                 <a href={cardPath} target="_blank" rel="noopener noreferrer"><ExternalLink />Open card</a>
               </Button>
-              <Button variant="ghost" onClick={() => setDialog('rotate')}>
+              <Button variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setDialog('rotate')}>
                 <RefreshCw />Revoke link
               </Button>
             </div>

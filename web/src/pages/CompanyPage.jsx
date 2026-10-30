@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Link, useLocation, useParams } from 'react-router';
-import { ArrowLeft, ExternalLink, Pencil, Plus, Search, ShieldCheck, Trash2, UserRound } from 'lucide-react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
+import { ArrowLeft, ChevronRight, ExternalLink, Pencil, Plus, Search, ShieldCheck, Trash2, UserRound } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { safeHttpUrl } from '../lib/utils.js';
 import { useAsync } from '../lib/useAsync.js';
@@ -16,6 +16,7 @@ import { ErrorAlert, SuccessAlert } from '../components/notice.jsx';
 export function CompanyPage() {
   const { id } = useParams();
   const notice = useLocation().state?.notice;
+  const navigate = useNavigate();
   const detail = useAsync(() => api.companies.get(id), [id]);
   const [query, setQuery] = useState('');
 
@@ -102,9 +103,16 @@ export function CompanyPage() {
             </TableHeader>
             <TableBody>
               {filtered.map((e) => (
-                <TableRow key={e.id}>
+                <TableRow
+                  key={e.id}
+                  onClick={() => navigate(`/employees/${e.id}`)}
+                  className="cursor-pointer hover:bg-muted/50"
+                >
                   <TableCell>
-                    <Link to={`/employees/${e.id}`} className="font-medium hover:underline">{e.name}</Link>
+                    <div className="flex items-center justify-between gap-2">
+                      <Link to={`/employees/${e.id}`} onClick={(ev) => ev.stopPropagation()} className="font-medium hover:underline">{e.name}</Link>
+                      <ChevronRight className="size-4 shrink-0 text-muted-foreground md:hidden" />
+                    </div>
                   </TableCell>
                   <TableCell>
                     {e.job_title ? <Badge variant="secondary">{e.job_title}</Badge> : <span className="text-muted-foreground">—</span>}

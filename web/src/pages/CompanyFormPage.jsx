@@ -4,6 +4,7 @@ import { Trash2, Upload, Building2 } from 'lucide-react';
 import { api, ApiError } from '../lib/api.js';
 import { useAsync } from '../lib/useAsync.js';
 import { readAsDataUrl } from '../lib/read-file.js';
+import { cn } from '../lib/utils.js';
 import { Button } from '../components/ui/button.jsx';
 import { Input, Label } from '../components/ui/input.jsx';
 import { Card, CardContent } from '../components/ui/card.jsx';
@@ -42,6 +43,7 @@ function CompanyForm({ id, initial }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [icon, setIcon] = useState(initial?.has_icon ?? false);
+  const [iconLight, setIconLight] = useState(initial?.icon_light ?? false);
   const [iconBusy, setIconBusy] = useState(false);
   const [iconError, setIconError] = useState(null);
 
@@ -82,8 +84,9 @@ function CompanyForm({ id, initial }) {
     setIconBusy(true);
     setIconError(null);
     try {
-      await api.companies.uploadIcon(id, await readAsDataUrl(file));
+      const result = await api.companies.uploadIcon(id, await readAsDataUrl(file));
       setIcon(true);
+      setIconLight(result?.icon_light ?? false);
     } catch (err) {
       setIconError(err instanceof ApiError ? err.fieldErrors.icon ?? err.message : err.message);
     } finally {
@@ -97,6 +100,7 @@ function CompanyForm({ id, initial }) {
     try {
       await api.companies.removeIcon(id);
       setIcon(false);
+      setIconLight(false);
     } catch (err) {
       setIconError(err.message);
     } finally {
@@ -155,14 +159,14 @@ function CompanyForm({ id, initial }) {
                 onChange={set('address')}
                 aria-invalid={Boolean(fieldErrors.address)}
                 aria-describedby={fieldErrors.address ? 'address-error' : undefined}
-                className="flex w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-[invalid=true]:border-destructive"
+                className="flex w-full rounded-md border border-input bg-card px-3 py-2 text-base shadow-sm md:text-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-[invalid=true]:border-destructive"
               />
             </Field>
             {editing ? (
               <div className="grid gap-2">
                 <Label>Logo</Label>
                 <div className="flex items-center gap-4">
-                  <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
+                  <div className={cn('flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg', iconLight ? 'bg-neutral-900' : 'bg-muted')}>
                     {icon ? (
                       <img src={`/admin/icons/${id}?v=${Date.now()}`} alt="" className="size-full object-contain" />
                     ) : (
