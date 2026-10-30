@@ -33,7 +33,7 @@ export function describePass({ employee, company, config }) {
     passTypeIdentifier: config.passTypeIdentifier,
     teamIdentifier: config.teamIdentifier,
     organizationName: company.name,
-    description: `${company.name} business card`,
+    description: `${company.name}`,
     serialNumber: employee.id,
     backgroundColor: 'rgb(0, 0, 0)',
     foregroundColor: 'rgb(255, 255, 255)',
