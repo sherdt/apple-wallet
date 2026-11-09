@@ -1,7 +1,7 @@
 import { buildApp } from './app.js';
 import { backfillIconFlags, createPool, createRepository, migrate } from './db.js';
 import { isLightArtwork } from './icon.js';
-import { loadCertificates, loadIcons } from './pass.js';
+import { loadCertificates } from './pass.js';
 
 function requireEnv(env, name) {
   const value = env[name];
@@ -37,7 +37,6 @@ async function main() {
     config,
     repo: createRepository(pool),
     certificates: await loadCertificates(config.certDir),
-    icons: await loadIcons(),
   });
 
   const shutdown = async () => {

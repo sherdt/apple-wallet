@@ -1,8 +1,36 @@
 # Apple Wallet vCards
 
 Web app to manage companies and their employees, and to issue Apple Wallet
-passes (`.pkpass`) and vCards (`.vcf`) for each employee. The first company is
-PRODYNA SE.
+passes (`.pkpass`) and vCards (`.vcf`) for each employee.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  admin["Admin browser<br/>React SPA /admin"]
+  guest["Guest / iPhone<br/>public card /p/:token"]
+  wallet["Apple Wallet"]
+
+  subgraph app["Node.js app (Fastify)"]
+    api["JSON API /admin/api"]
+    pub["Public routes /p/*"]
+    pass["passkit-generator<br/>.pkpass + vCard"]
+    img["sharp<br/>logo and photo processing"]
+  end
+
+  pg[("PostgreSQL")]
+  certs["Apple certificates<br/>WALLET_CERT_DIR"]
+
+  admin -->|"JWT"| api
+  guest --> pub
+  guest -->|"Add to Wallet"| wallet
+  api --> img
+  api --> pg
+  pub --> pg
+  pub --> pass
+  api --> pass
+  pass -. "signs with" .-> certs
+```
 
 ## Configuration
 
@@ -18,9 +46,25 @@ PRODYNA SE.
 
 ## Apple certificates
 
+The app reads exactly three PEM files from `WALLET_CERT_DIR` (`src/pass.js`).
+Any other files in that directory, such as `.cer` or `.p12`, are ignored.
+
+| File | Content | Expected in |
+|------|---------|-------------|
+| `wwdr.pem` | Apple WWDR G4 intermediate certificate (PEM) | `$WALLET_CERT_DIR/wwdr.pem` |
+| `signer-cert.pem` | Pass certificate (PEM, public part) | `$WALLET_CERT_DIR/signer-cert.pem` |
+| `signer-key.pem` | Private key of the pass certificate (PEM, unencrypted) | `$WALLET_CERT_DIR/signer-key.pem` |
+
+Where the directory lives:
+
+- **Local development:** `./certs` (set by `WALLET_CERT_DIR=./certs` in `.env.example`).
+- **Docker:** the image does not contain certificates. Mount the directory at
+  runtime; the container reads it from `/certs` by default.
+- **Azure (AKS):** mounted into the pod via `wallet_cert_dir` (see [Deployment](#deployment)).
+
 Create a Pass Type ID and a pass certificate in the Apple Developer portal,
 then download the certificate and export it as `.p12` from Keychain. Extract the
-PEM files:
+PEM files (the `.p12` itself is not read by the app):
 
 ```sh
 openssl pkcs12 -in pass.p12 -clcerts -nokeys -out signer-cert.pem
@@ -90,11 +134,12 @@ Requires Node 22.9+ and Docker.
 
 ## Company icons
 
-When a company is created, or its website changes, the app fetches the icon from
-the website (`<link rel="icon">` tags, then `/icon.svg`, then
-`/apple-touch-icon.png`) and stores it as a PNG in the database. Passes use it
-instead of the default `assets/icon*.png`. Private and loopback addresses are
-refused. Use `POST /admin/api/companies/:id/icon` to retry a failed fetch.
+Admins upload a company logo in the admin UI, or with
+`POST /admin/api/companies/:id/icon` and a data URL. SVG, PNG, JPEG and WebP are
+accepted. The app converts it to a 256 px PNG and stores it in the database.
+`DELETE /admin/api/companies/:id/icon` removes it. The logo is then used for the
+pass icons and header logo. Companies without a logo get a fully transparent
+placeholder icon, because Apple Wallet requires `icon.png`.
 
 ## Deployment
 

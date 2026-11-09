@@ -37,7 +37,7 @@ const slugify = (text) =>
 
 const isUniqueViolation = (err) => err?.code === '23505';
 
-export async function buildApp({ config, repo, certificates, icons }) {
+export async function buildApp({ config, repo, certificates }) {
   const staticAssets = await Promise.all(
     Object.entries(STATIC_ASSETS).map(async ([route, asset]) => [
       route,
@@ -421,7 +421,7 @@ export async function buildApp({ config, repo, certificates, icons }) {
       company,
       config,
       certificates,
-      icons: { ...(await passIcons(storedIcon, icons)), ...thumbnails },
+      icons: { ...(await passIcons(storedIcon)), ...thumbnails },
     });
     return reply
       .type('application/vnd.apple.pkpass')

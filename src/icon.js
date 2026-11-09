@@ -48,15 +48,24 @@ export async function renderBox(buffer, width, height) {
     .toBuffer();
 }
 
-// Builds the icon set for a pass. Uses the company's stored icon for the app icon
-// and the header logo when present, otherwise the bundled defaults.
-export async function passIcons(storedIcon, defaults) {
-  if (!storedIcon) return defaults;
+// Apple Wallet requires icon.png, so companies without a logo get a fully transparent placeholder.
+async function transparentIcons() {
+  const blank = (size) =>
+    sharp({ create: { width: size, height: size, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .png()
+      .toBuffer();
+  const [icon, icon2x, icon3x] = await Promise.all([blank(29), blank(58), blank(87)]);
+  return { 'icon.png': icon, 'icon@2x.png': icon2x, 'icon@3x.png': icon3x };
+}
+
+// Builds the icon set for a pass from the company's stored icon, or a transparent placeholder without one.
+export async function passIcons(storedIcon) {
+  if (!storedIcon) return transparentIcons();
   const icons = await Promise.all(
     Object.entries(PASS_ICON_SIZES).map(async ([name, size]) => [name, await renderSquare(storedIcon, size)]),
   );
   const logos = await Promise.all(
     Object.entries(PASS_LOGO_SIZES).map(async ([name, [w, h]]) => [name, await renderBox(storedIcon, w, h)]),
   );
-  return { ...defaults, ...Object.fromEntries([...icons, ...logos]) };
+  return Object.fromEntries([...icons, ...logos]);
 }

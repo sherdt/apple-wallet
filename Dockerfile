@@ -16,7 +16,6 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY src ./src
 COPY public ./public
-COPY assets ./assets
 COPY --from=web-build /build/public/admin ./public/admin
 
 USER 65532:65532

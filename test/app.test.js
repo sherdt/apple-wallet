@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { escapeValue, buildVCard } from '../src/vcard.js';
 import { validateCompany, validateEmployee } from '../src/validation.js';
-import { buildPass, loadIcons } from '../src/pass.js';
+import { buildPass } from '../src/pass.js';
 import { buildApp } from '../src/app.js';
 import { html, raw } from '../src/views.js';
 
@@ -209,7 +209,6 @@ test('buildPass produces a signed pkpass archive', async () => {
     company,
     config,
     certificates: makeCerts(),
-    icons: await loadIcons(),
   });
   assert.equal(body.subarray(0, 2).toString(), 'PK');
 });
@@ -231,7 +230,7 @@ async function signIn(app, email = `${randomUUID()}@example.com`) {
 const bodyless = ({ 'content-type': _ignored, ...headers }) => headers;
 
 test('admin API requires a JWT and rejects cross-origin writes', async () => {
-  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts(), icons: await loadIcons() });
+  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts() });
   const anon = await app.inject({ url: '/admin/api/companies' });
   assert.equal(anon.statusCode, 401);
   const badToken = await app.inject({
@@ -251,7 +250,7 @@ test('admin API requires a JWT and rejects cross-origin writes', async () => {
 });
 
 test('register, login and me issue and check tokens', async () => {
-  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts(), icons: await loadIcons() });
+  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts() });
   const email = 'Owner@Example.com';
 
   const reg = await app.inject({
@@ -313,7 +312,7 @@ test('register, login and me issue and check tokens', async () => {
 });
 
 test('profile stores the real name and rejects blank names', async () => {
-  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts(), icons: await loadIcons() });
+  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts() });
   const headers = await signIn(app);
   const blank = await app.inject({
     method: 'PUT', url: '/admin/api/auth/profile', headers,
@@ -334,7 +333,7 @@ test('profile stores the real name and rejects blank names', async () => {
 });
 
 test('change-password requires the current password and a matching repeat', async () => {
-  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts(), icons: await loadIcons() });
+  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts() });
   const email = `${randomUUID()}@example.com`;
   const headers = await signIn(app, email);
   const NEW = 'a brand new passphrase';
@@ -363,7 +362,7 @@ test('change-password requires the current password and a matching repeat', asyn
 });
 
 test('companies are visible only to the user who created them', async () => {
-  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts(), icons: await loadIcons() });
+  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts() });
   const alice = await signIn(app);
   const bob = await signIn(app);
 
@@ -393,7 +392,7 @@ test('companies are visible only to the user who created them', async () => {
 
 test('admin API creates, validates, updates and deletes companies', async () => {
   const repo = fakeRepo();
-  const app = await buildApp({ config, repo, certificates: makeCerts(), icons: await loadIcons() });
+  const app = await buildApp({ config, repo, certificates: makeCerts() });
   const headers = await signIn(app);
 
   const created = await app.inject({ method: 'POST', url: '/admin/api/companies', headers, payload: JSON.stringify({ name: 'Acme' }) });
@@ -423,7 +422,7 @@ test('admin API creates, validates, updates and deletes companies', async () => 
 });
 
 test('admin API flow creates an employee and public routes serve the card', async () => {
-  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts(), icons: await loadIcons() });
+  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts() });
   const headers = await signIn(app);
   const companyRes = await app.inject({ method: 'POST', url: '/admin/api/companies', headers, payload: JSON.stringify({ name: 'Flow Co' }) });
   const flowCompany = companyRes.json();
@@ -476,7 +475,7 @@ test('admin API flow creates an employee and public routes serve the card', asyn
 });
 
 test('company logo is uploaded, returned as a flag and removed', async () => {
-  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts(), icons: await loadIcons() });
+  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts() });
   const headers = await signIn(app);
   const created = (await app.inject({ method: 'POST', url: '/admin/api/companies', headers, payload: JSON.stringify({ name: 'Logo Co', website: 'https://logo.example.com/' }) })).json();
   assert.equal(created.has_icon, false);
@@ -506,7 +505,7 @@ test('employee photo is stored, returned and used as the pass thumbnail', async 
   const source = await sharp({ create: { width: 300, height: 200, channels: 3, background: '#3366cc' } }).png().toBuffer();
   const dataUrl = `data:image/png;base64,${source.toString('base64')}`;
 
-  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts(), icons: await loadIcons() });
+  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts() });
   const headers = await signIn(app);
   const owned = (await app.inject({ method: 'POST', url: '/admin/api/companies', headers, payload: JSON.stringify({ name: 'Photo Co' }) })).json();
   const emp = (await app.inject({
@@ -552,7 +551,7 @@ test('employee photo is stored, returned and used as the pass thumbnail', async 
 });
 
 test('API responses and public pages carry security headers', async () => {
-  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts(), icons: await loadIcons() });
+  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts() });
   const headers = await signIn(app);
   const res = await app.inject({ url: '/admin/api/companies', headers: bodyless(headers) });
   assert.match(res.headers['content-security-policy'], /script-src 'self'/);
@@ -585,10 +584,15 @@ test('renderSquare turns an SVG into a square PNG and passIcons uses it', async 
   const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 256"><rect width="512" height="256" fill="red"/></svg>');
   const png = await renderSquare(svg, 256);
   assert.equal(png.subarray(1, 4).toString(), 'PNG');
-  const defaults = { 'icon.png': Buffer.from('default') };
-  assert.deepEqual(await passIcons(null, defaults), defaults);
-  const custom = await passIcons(png, defaults);
-  assert.notEqual(custom['icon.png'], defaults['icon.png']);
+  const placeholder = await passIcons(null);
+  const sharpMod = (await import('sharp')).default;
+  for (const [name, size] of [['icon.png', 29], ['icon@2x.png', 58], ['icon@3x.png', 87]]) {
+    const { data, info } = await sharpMod(placeholder[name]).raw().toBuffer({ resolveWithObject: true });
+    assert.equal(info.width, size, name);
+    assert.ok(data.every((_, i) => i % info.channels !== 3 || data[i] === 0), `${name} is not transparent`);
+  }
+  const custom = await passIcons(png);
+  assert.ok(custom['icon.png']);
   const sharp = (await import('sharp')).default;
   for (const [name, size] of [['icon.png', 29], ['icon@2x.png', 58], ['icon@3x.png', 87]]) {
     assert.equal((await sharp(custom[name]).metadata()).width, size, name);
@@ -600,7 +604,7 @@ test('renderSquare turns an SVG into a square PNG and passIcons uses it', async 
 });
 
 test('company admins can manage a company once added by email', async () => {
-  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts(), icons: await loadIcons() });
+  const app = await buildApp({ config, repo: fakeRepo(), certificates: makeCerts() });
   const owner = await signIn(app, 'creator@example.com');
   const guestEmail = 'guest@example.com';
   const guest = await signIn(app, guestEmail);

@@ -1,10 +1,7 @@
 import { readFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { PKPass } from 'passkit-generator';
 import { buildVCard, photoUrl } from './vcard.js';
-
-const ASSET_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets');
 
 // Reads the Apple signing material mounted from the Kubernetes secret (or
 // wherever WALLET_CERT_DIR points). All three files are PEM.
@@ -13,13 +10,6 @@ export async function loadCertificates(dir) {
     ['wwdr.pem', 'signer-cert.pem', 'signer-key.pem'].map((name) => readFile(join(dir, name))),
   );
   return { wwdr, signerCert, signerKey };
-}
-
-const IMAGE_FILES = ['icon.png', 'icon@2x.png', 'icon@3x.png', 'logo.png', 'logo@2x.png'];
-
-export async function loadIcons() {
-  const images = await Promise.all(IMAGE_FILES.map((name) => readFile(join(ASSET_DIR, name))));
-  return Object.fromEntries(IMAGE_FILES.map((name, i) => [name, images[i]]));
 }
 
 const field = (key, label, value) => (value ? { key, label, value } : null);
